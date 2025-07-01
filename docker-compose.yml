@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  llm-fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+    environment:
+      - MODEL_PATH=/app/data/vector_db
+      - LOG_LEVEL=info
+    depends_on:
+      - vector_db
+
+  vector_db:
+    image: vector_db_image:latest
+    volumes:
+      - ./data/vector_db:/data
+    environment:
+      - DB_CONFIG=/data/config.json
+      - DB_TYPE=your_db_type_here
+      - DB_CONNECTION_STRING=your_connection_string_here
+
+networks:
+  default:
+    driver: bridge

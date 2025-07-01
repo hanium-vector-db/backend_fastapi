@@ -1,0 +1,14 @@
+FastAPI
+uvicorn
+transformers
+torch
+langchain
+sentence-transformers
+huggingface-hub
+pydantic
+numpy
+scikit-learn
+wikipedia
+bitsandbytes
+accelerate
+datasets
