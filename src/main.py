@@ -31,17 +31,53 @@ app.include_router(router, prefix="/api/v1")
 @app.get("/")
 def read_root():
     return {
-        "message": "Welcome to the LLM FastAPI Server",
+        "message": "🚀 LLM FastAPI 서버에 오신 것을 환영합니다!",
         "version": "1.0.0",
+        "description": "40개 이상의 다양한 로컬 언어 모델을 지원하는 고성능 AI 서버",
+        "features": [
+            "다양한 크기의 LLM 모델 지원 (0.5B-72B)",
+            "한국어, 코딩, 수학 특화 모델",
+            "RAG (검색 증강 생성) 기능",
+            "실시간 모델 전환",
+            "GPU 메모리 최적화"
+        ],
         "endpoints": {
-            "generate": "/api/v1/generate",
-            "chat": "/api/v1/chat", 
-            "embed": "/api/v1/embed",
-            "rag": "/api/v1/rag",
-            "health": "/api/v1/health",
-            "docs": "/docs",
-            "redoc": "/redoc"
-        }
+            "기본 기능": {
+                "generate": "/api/v1/generate",
+                "chat": "/api/v1/chat", 
+                "embed": "/api/v1/embed",
+                "rag": "/api/v1/rag",
+                "health": "/api/v1/health"
+            },
+            "모델 관리": {
+                "models": "/api/v1/models",
+                "categories": "/api/v1/models/categories",
+                "category_models": "/api/v1/models/category/{category}",
+                "recommend": "/api/v1/models/recommend",
+                "compare": "/api/v1/models/compare",
+                "search": "/api/v1/models/search",
+                "stats": "/api/v1/models/stats",
+                "switch": "/api/v1/models/switch",
+                "model_info": "/api/v1/models/info/{model_key}"
+            },
+            "시스템 정보": {
+                "gpu": "/api/v1/system/gpu"
+            },
+            "문서": {
+                "docs": "/docs",
+                "redoc": "/redoc"
+            }
+        },
+        "supported_model_categories": [
+            "ultra-light (0.5B)",
+            "light (1-3B)", 
+            "medium (7-13B)",
+            "large (14B+)",
+            "korean (한국어 특화)",
+            "code (코딩 특화)",
+            "math (수학/과학 특화)",
+            "multilingual (다국어 지원)"
+        ]
     }
 
 @app.on_event("startup")
