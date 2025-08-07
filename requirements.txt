@@ -3,6 +3,10 @@ uvicorn
 transformers
 torch
 langchain
+langchain-community
+langchain-chroma
+langchain-text-splitters
+langchain-huggingface
 sentence-transformers
 huggingface-hub
 pydantic
@@ -12,3 +16,6 @@ wikipedia
 bitsandbytes
 accelerate
 datasets
+psutil
+gradio
+requests
