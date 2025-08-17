@@ -1,14 +1,17 @@
 from langchain.schema.runnable import RunnablePassthrough
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_community.document_loaders import WikipediaLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-import uuid
 import logging
+import os
+from utils.helpers import search_news, create_documents_from_news
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# --- 상수 정의 ---
+DB_PERSIST_DIRECTORY = "./data/vector_db"
 
 class RAGService:
     def __init__(self, llm_handler, embedding_handler):
@@ -23,37 +26,20 @@ class RAGService:
         try:
             logger.info("Initializing RAG service...")
             
-            # Load documents from Wikipedia
-            examples = ['챗GPT', '인공지능', '트랜스포머_(기계_학습)', '딥러닝', '머신러닝']
-            docs = []
-            for query in examples:
-                try:
-                    loader = WikipediaLoader(query=query, lang='ko', load_max_docs=1, doc_content_chars_max=1000)
-                    docs += loader.load()
-                except Exception as e:
-                    logger.warning(f"Failed to load Wikipedia document for {query}: {e}")
+            # 데이터베이스 디렉토리가 없으면 생성
+            if not os.path.exists(DB_PERSIST_DIRECTORY):
+                os.makedirs(DB_PERSIST_DIRECTORY)
+                logger.info(f"Created vector database directory: {DB_PERSIST_DIRECTORY}")
 
-            if not docs:
-                logger.error("No documents were loaded!")
-                return
-
-            logger.info(f"Loaded {len(docs)} documents")
-
-            # Split documents into chunks
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=80)
-            chunks = text_splitter.split_documents(docs)
-            logger.info(f"Created {len(chunks)} chunks")
-
-            # Create vector database
-            random_dir = f"./RAG_db_{str(uuid.uuid4())[:8]}"
-            logger.info(f"Creating vector database in: {random_dir}")
-
-            self.db = Chroma.from_documents(
-                documents=chunks,
-                embedding=self.embedding_handler.embeddings,
-                persist_directory=random_dir,
+            # 기존 DB를 로드하거나 새로 생성
+            self.db = Chroma(
+                persist_directory=DB_PERSIST_DIRECTORY,
+                embedding_function=self.embedding_handler.embeddings,
                 collection_metadata={'hnsw:space': 'l2'}
             )
+            
+            logger.info(f"Vector database loaded/initialized from: {DB_PERSIST_DIRECTORY}")
+            logger.info(f"Current document count: {self.db._collection.count()}")
 
             # Create retriever
             self.retriever = self.db.as_retriever(search_kwargs={'k': 3})
@@ -67,11 +53,44 @@ class RAGService:
             logger.error(f"Error initializing RAG service: {e}")
             raise
 
+    def add_documents_from_web(self, query: str, max_results: int = 5):
+        """
+        웹에서 뉴스를 검색하고 해당 내용을 Vector DB에 추가합니다.
+        """
+        try:
+            logger.info(f"Starting to add documents from web for query: '{query}'")
+            # 1. 뉴스 검색
+            news_results = search_news(query, max_results)
+            if not news_results:
+                return 0, "No news articles found."
+
+            # 2. 문서 생성 (스크래핑)
+            documents = create_documents_from_news(news_results)
+            if not documents:
+                return 0, "Failed to create documents from news articles."
+
+            # 3. 텍스트 분할
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=80)
+            chunks = text_splitter.split_documents(documents)
+            logger.info(f"Created {len(chunks)} chunks from {len(documents)} documents.")
+
+            # 4. DB에 추가
+            if chunks:
+                self.db.add_documents(chunks)
+                self.db.persist() # 변경사항 저장
+                logger.info(f"Successfully added {len(chunks)} new chunks to the vector database.")
+                return len(chunks), f"Successfully added {len(chunks)} new chunks to the database."
+            else:
+                return 0, "No processable content found in the articles."
+        except Exception as e:
+            logger.error(f"Error adding documents from web: {e}")
+            return 0, f"An error occurred: {str(e)}"
+
     def _setup_rag_chain(self):
         try:
             # RAG prompt
             rag_prompt = ChatPromptTemplate.from_messages([
-                ('system', '다음 Context를 사용하여 Question에 답변해주세요. 한국어로 답변해주세요.'),
+                ('system', '다음 Context를 사용하여 Question에 답변해주세요. 만약 Context에 정보가 없다면, 아는대로 답변해주세요. 항상 한국어로 답변해주세요.'),
                 ('user', 'Context: {context}\n---\nQuestion: {question}')
             ])
 
@@ -88,7 +107,7 @@ class RAGService:
             raise
 
     def format_docs(self, docs):
-        return "\n---\n".join('주제: ' + doc.metadata.get('title', 'Unknown') + '\n' + doc.page_content for doc in docs)
+        return "\n---\n".join(f"출처: {doc.metadata.get('source', 'Unknown')}\n제목: {doc.metadata.get('title', 'Unknown')}\n내용: {doc.page_content}" for doc in docs)
 
     def generate_response(self, query: str) -> str:
         try:
@@ -108,7 +127,8 @@ class RAGService:
                 return []
             
             docs = self.retriever.invoke(query)
-            return [{"title": doc.metadata.get('title', 'Unknown'), "content": doc.page_content} for doc in docs]
+            return [{"title": doc.metadata.get('title', 'Unknown'), "content": doc.page_content, "source": doc.metadata.get('source', 'Unknown')}
+ for doc in docs]
             
         except Exception as e:
             logger.error(f"Error retrieving documents: {e}")

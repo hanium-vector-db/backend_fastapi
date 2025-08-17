@@ -18,4 +18,5 @@ accelerate
 datasets
 psutil
 gradio
-requests
+pydantic-settings
+duckduckgo-search

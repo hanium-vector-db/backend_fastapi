@@ -2,6 +2,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from core.config import settings
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from models.llm_handler import LLMHandler
@@ -27,6 +28,11 @@ class EmbeddingRequest(BaseModel):
 class RAGRequest(BaseModel):
     question: str
     model_key: str = None  # 사용할 모델 키
+
+class RAGUpdateRequest(BaseModel):
+    query: str
+    max_results: int = 5
+
 
 class ChatRequest(BaseModel):
     message: str
@@ -132,6 +138,28 @@ async def rag_response(request: RAGRequest):
         logger.error(f"RAG 엔드포인트 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/rag/update-news")
+async def update_rag_with_news(request: RAGUpdateRequest):
+    """
+    웹에서 최신 뉴스를 검색하여 RAG 데이터베이스를 업데이트합니다.
+    """
+    try:
+        service = get_rag_service() # 기본 RAG 서비스 인스턴스 가져오기
+        added_chunks, message = service.add_documents_from_web(request.query, request.max_results)
+        
+        if added_chunks > 0:
+            return {"message": message, "added_chunks": added_chunks}
+        else:
+            # 문서 추가에 실패했거나 찾지 못한 경우
+            raise HTTPException(status_code=404, detail=message)
+            
+    except HTTPException as e:
+        raise e # HTTP 예외는 그대로 전달
+    except Exception as e:
+        logger.error(f"뉴스 업데이트 엔드포인트 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+
+
 @router.get("/health")
 async def health_check():
     current_model_info = None
@@ -151,17 +179,17 @@ async def health_check():
 @router.get("/models")
 async def list_models():
     """지원되는 모델 목록 반환"""
-    models = LLMHandler.get_supported_models()
+    # config.py에서 정의된 모델 목록을 사용
+    model_keys = settings.available_models
+    
+    # Gradio가 기대하는 형식으로 변환
+    # 각 모델에 대한 상세 정보가 필요하다면 추가 로직이 필요하지만,
+    # 현재는 키 목록만 반환하도록 수정
+    models_dict = {key: {"model_id": key} for key in model_keys}
+    
     return {
-        "supported_models": models,
-        "total_models": len(models),
-        "categories": {
-            "small": [k for k, v in models.items() if "1b" in k or "1.5b" in k or "3b" in k],
-            "medium": [k for k, v in models.items() if "7b" in k or "8b" in k or "9b" in k or "10b" in k or "12b" in k],
-            "large": [k for k, v in models.items() if "32b" in k or "70b" in k],
-            "korean": [k for k, v in models.items() if "solar" in k or "kullm" in k],
-            "code": [k for k, v in models.items() if "code" in k]
-        }
+        "supported_models": models_dict,
+        "total_models": len(model_keys)
     }
 
 @router.get("/models/categories")
