@@ -38,20 +38,151 @@ def make_api_call(endpoint, payload, method="post"):
     except requests.exceptions.RequestException as e:
         return {"error": f"백엔드 서버 연결 실패: {e}"}
 
-def generate_text(prompt, model_key):
+def generate_text(prompt, model_key, streaming_mode):
     """'/generate' 엔드포인트를 호출합니다."""
     if not prompt:
         return "오류: 프롬프트를 입력해주세요.", {"error": "Prompt is empty"}
     
-    payload = {"prompt": prompt}
+    payload = {"prompt": prompt, "stream": streaming_mode}
     if model_key and model_key != "기본 모델":
         payload["model_key"] = model_key
 
-    result = make_api_call("generate", payload)
-    if "error" in result:
-        return result["error"], result
+    if streaming_mode:
+        # 스트리밍 모드
+        try:
+            response = requests.post(
+                f"{API_URL}/generate", 
+                json=payload, 
+                stream=True,
+                headers={'Accept': 'text/event-stream'},
+                timeout=300
+            )
+            
+            if response.status_code != 200:
+                return f"오류: HTTP {response.status_code}", {"error": "Stream failed"}
+            
+            full_text = ""
+            token_count = 0
+            
+            for line in response.iter_lines(decode_unicode=True):
+                if line and line.startswith('data: '):
+                    try:
+                        data_str = line[6:]  # 'data: ' 제거
+                        data = json.loads(data_str)
+                        if 'error' in data:
+                            return data['error'], {"error": data['error']}
+                        if 'content' in data and data['content']:
+                            full_text += data['content']
+                            token_count += 1
+                        if data.get('done', False):
+                            break
+                    except json.JSONDecodeError:
+                        continue
+            
+            return full_text, {"model_info": {"streaming": True, "complete": True, "tokens": token_count}}
+            
+        except Exception as e:
+            return f"스트리밍 오류: {str(e)}", {"error": str(e)}
+    else:
+        # 일반 모드
+        result = make_api_call("generate", payload)
+        
+        if "error" in result:
+            return result["error"], result
+        else:
+            return result.get("response", "응답 없음"), result.get("model_info", {})
+
+def stream_generate_text_generator(payload):
+    """스트리밍 텍스트 생성 (generator)"""
+    try:
+        response = requests.post(
+            f"{API_URL}/generate", 
+            json=payload, 
+            stream=True,
+            headers={'Accept': 'text/event-stream'},
+            timeout=300
+        )
+        
+        if response.status_code != 200:
+            yield f"오류: HTTP {response.status_code}", {"error": "Stream failed"}
+            return
+        
+        full_text = ""
+        
+        for line in response.iter_lines(decode_unicode=True):
+            if line and line.startswith('data: '):
+                try:
+                    data_str = line[6:]  # 'data: ' 제거
+                    data = json.loads(data_str)
+                    if 'error' in data:
+                        yield data['error'], {"error": data['error']}
+                        return
+                    if 'content' in data and data['content']:
+                        full_text += data['content']
+                        # 실시간으로 누적된 텍스트 출력
+                        yield full_text, {"model_info": {"streaming": True, "tokens_so_far": len(full_text.split())}}
+                    if data.get('done', False):
+                        # 최종 완성된 텍스트
+                        yield full_text, {"model_info": {"streaming": True, "complete": True}}
+                        return
+                except json.JSONDecodeError:
+                    continue
+        
+    except Exception as e:
+        yield f"스트리밍 오류: {str(e)}", {"error": str(e)}
+
+def stream_generate_text(payload):
+    """기존 호환성을 위한 래퍼 함수"""
+    full_text = ""
+    model_info = {}
     
-    return result.get("response", "응답 없음"), result.get("model_info", {})
+    for text, info in stream_generate_text_generator(payload):
+        full_text = text
+        model_info = info
+    
+    return full_text, model_info
+
+def stream_generate_text_with_progress(payload):
+    """진행상황을 표시하면서 스트리밍 텍스트 생성"""
+    import time
+    try:
+        response = requests.post(
+            f"{API_URL}/generate", 
+            json=payload, 
+            stream=True,
+            headers={'Accept': 'text/event-stream'},
+            timeout=300
+        )
+        
+        if response.status_code != 200:
+            return f"오류: HTTP {response.status_code}", {"error": "Stream failed"}
+        
+        full_text = ""
+        last_update_time = time.time()
+        
+        for line in response.iter_lines(decode_unicode=True):
+            if line and line.startswith('data: '):
+                try:
+                    data_str = line[6:]  # 'data: ' 제거
+                    data = json.loads(data_str)
+                    if 'error' in data:
+                        return data['error'], {"error": data['error']}
+                    if 'content' in data and data['content']:
+                        full_text += data['content']
+                        # 짧은 지연을 통해 실시간 효과 시뮬레이션
+                        current_time = time.time()
+                        if current_time - last_update_time > 0.05:  # 50ms마다 업데이트
+                            time.sleep(0.01)
+                            last_update_time = current_time
+                    if data.get('done', False):
+                        break
+                except json.JSONDecodeError:
+                    continue
+        
+        return full_text, {"model_info": {"streaming": True, "complete": True, "length": len(full_text)}}
+        
+    except Exception as e:
+        return f"스트리밍 오류: {str(e)}", {"error": str(e)}
 
 def chat_with_bot(message, history, model_key):
     """'/chat' 엔드포인트를 호출합니다."""
@@ -142,6 +273,7 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
     with gr.Tabs():
         # 1. 텍스트 생성 탭
         with gr.TabItem("📝 텍스트 생성"):
+            gr.Markdown("### 💡 실시간 스트리밍을 원하시면 [전용 스트리밍 페이지](/stream)를 이용해주세요!")
             with gr.Row():
                 with gr.Column(scale=2):
                     gen_prompt = gr.Textbox(lines=5, label="프롬프트", placeholder="인공지능의 미래에 대해 짧은 글을 써줘.")
@@ -150,6 +282,7 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
                         choices=["기본 모델", "qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"],
                         value="기본 모델"
                     )
+                    gen_streaming = gr.Checkbox(label="스트리밍 모드 (완성 후 일괄 표시)", value=False)
                     gen_button = gr.Button("생성하기", variant="primary")
                 with gr.Column(scale=3):
                     gen_output = gr.Textbox(lines=10, label="생성된 텍스트", interactive=False)
@@ -196,7 +329,7 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
             rag_docs = gr.Markdown(label="참고 문서")
 
     # --- 이벤트 핸들러 ---
-    gen_button.click(fn=generate_text, inputs=[gen_prompt, gen_model_select], outputs=[gen_output, gen_model_info])
+    gen_button.click(fn=generate_text, inputs=[gen_prompt, gen_model_select, gen_streaming], outputs=[gen_output, gen_model_info])
     rag_button.click(fn=rag_query, inputs=[rag_question, rag_model_select], outputs=[rag_answer, rag_docs, rag_model_info_output])
     update_button.click(fn=update_rag_news, inputs=[news_query, news_max_results], outputs=update_status)
 

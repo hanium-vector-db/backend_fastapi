@@ -4,6 +4,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.config import settings
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from models.llm_handler import LLMHandler
 from models.embedding_handler import EmbeddingHandler
@@ -21,6 +22,7 @@ class GenerateRequest(BaseModel):
     prompt: str
     max_length: int = 512
     model_key: str = None  # 사용할 모델 키
+    stream: bool = False  # 스트리밍 여부
 
 class EmbeddingRequest(BaseModel):
     text: str
@@ -37,6 +39,7 @@ class RAGUpdateRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     model_key: str = None  # 사용할 모델 키
+    stream: bool = False  # 스트리밍 여부
 
 class ModelSwitchRequest(BaseModel):
     model_key: str  # 전환할 모델 키
@@ -88,18 +91,36 @@ def get_rag_service(model_key: str = None):
 async def generate_response(request: GenerateRequest):
     try:
         handler = get_llm_handler(request.model_key)
-        response = handler.generate(request.prompt)
-        return {
-            "response": response, 
-            "prompt": request.prompt,
-            "model_info": {
-                "model_key": handler.model_key,
-                "model_id": handler.SUPPORTED_MODELS[handler.model_key]["model_id"],
-                "description": handler.SUPPORTED_MODELS[handler.model_key]["description"],
-                "category": handler.SUPPORTED_MODELS[handler.model_key]["category"],
-                "loaded": handler.model is not None
+        
+        if request.stream:
+            # 스트리밍 응답
+            def generate_stream():
+                for chunk in handler.generate(request.prompt, request.max_length, stream=True):
+                    yield chunk
+            
+            return StreamingResponse(
+                generate_stream(), 
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/event-stream"
+                }
+            )
+        else:
+            # 일반 응답
+            response = handler.generate(request.prompt, request.max_length, stream=False)
+            return {
+                "response": response, 
+                "prompt": request.prompt,
+                "model_info": {
+                    "model_key": handler.model_key,
+                    "model_id": handler.SUPPORTED_MODELS[handler.model_key]["model_id"],
+                    "description": handler.SUPPORTED_MODELS[handler.model_key]["description"],
+                    "category": handler.SUPPORTED_MODELS[handler.model_key]["category"],
+                    "loaded": handler.model is not None
+                }
             }
-        }
     except Exception as e:
         logger.error(f"생성 엔드포인트 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -108,18 +129,36 @@ async def generate_response(request: GenerateRequest):
 async def chat_response(request: ChatRequest):
     try:
         handler = get_llm_handler(request.model_key)
-        response = handler.chat_generate(request.message)
-        return {
-            "response": response, 
-            "message": request.message,
-            "model_info": {
-                "model_key": handler.model_key,
-                "model_id": handler.SUPPORTED_MODELS[handler.model_key]["model_id"],
-                "description": handler.SUPPORTED_MODELS[handler.model_key]["description"],
-                "category": handler.SUPPORTED_MODELS[handler.model_key]["category"],
-                "loaded": handler.model is not None
+        
+        if request.stream:
+            # 스트리밍 응답
+            def chat_stream():
+                for chunk in handler.chat_generate(request.message, stream=True):
+                    yield chunk
+            
+            return StreamingResponse(
+                chat_stream(), 
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/event-stream"
+                }
+            )
+        else:
+            # 일반 응답
+            response = handler.chat_generate(request.message, stream=False)
+            return {
+                "response": response, 
+                "message": request.message,
+                "model_info": {
+                    "model_key": handler.model_key,
+                    "model_id": handler.SUPPORTED_MODELS[handler.model_key]["model_id"],
+                    "description": handler.SUPPORTED_MODELS[handler.model_key]["description"],
+                    "category": handler.SUPPORTED_MODELS[handler.model_key]["category"],
+                    "loaded": handler.model is not None
+                }
             }
-        }
     except Exception as e:
         logger.error(f"채팅 엔드포인트 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))

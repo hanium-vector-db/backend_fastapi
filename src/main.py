@@ -5,6 +5,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import gradio as gr
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from api.routes import router
 from gradio_app import gradio_ui  # Gradio UI 임포트
@@ -64,6 +66,10 @@ def read_root():
                 "rag": "/api/v1/rag",
                 "health": "/api/v1/health"
             },
+            "UI 인터페이스": {
+                "gradio_ui": "/ui",
+                "streaming_ui": "/stream"
+            },
             "모델 관리": {
                 "models": "/api/v1/models",
                 "categories": "/api/v1/models/categories",
@@ -94,6 +100,20 @@ def read_root():
             "multilingual (다국어 지원)"
         ]
     }
+
+# 정적 파일 서빙
+static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+if os.path.exists(static_path):
+    app.mount("/static", StaticFiles(directory=static_path), name="static")
+
+# 스트리밍 페이지 라우트
+@app.get("/stream")
+async def streaming_page():
+    streaming_file = os.path.join(static_path, "streaming.html")
+    if os.path.exists(streaming_file):
+        return FileResponse(streaming_file)
+    else:
+        return {"error": "Streaming page not found"}
 
 # Gradio UI를 FastAPI 앱에 마운트
 app = gr.mount_gradio_app(app, gradio_ui, path="/ui")

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실시간 스트리밍 LLM</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .input-section {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            resize: vertical;
+            font-family: inherit;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        select, button {
+            padding: 12px 20px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border-color: #007bff;
+            transition: all 0.3s;
+        }
+        button:hover:not(:disabled) {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .output-section {
+            margin-top: 30px;
+        }
+        .output-box {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 200px;
+            font-size: 16px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            position: relative;
+        }
+        .status {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        .streaming-indicator {
+            display: none;
+            color: #007bff;
+            font-weight: bold;
+        }
+        .streaming-indicator.active {
+            display: block;
+        }
+        .token-counter {
+            color: #666;
+        }
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            border-color: #f5c6cb;
+        }
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+        }
+        .cursor {
+            animation: blink 1s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 실시간 스트리밍 LLM</h1>
+        
+        <div class="input-section">
+            <textarea id="promptInput" placeholder="여기에 프롬프트를 입력하세요... (예: Python의 장점에 대해 설명해주세요)"></textarea>
+            
+            <div class="controls">
+                <select id="modelSelect">
+                    <option value="">기본 모델</option>
+                    <option value="qwen2.5-7b">Qwen 2.5 7B</option>
+                    <option value="llama3.1-8b">Llama 3.1 8B</option>
+                    <option value="gemma-3-4b">Gemma 2 9B</option>
+                </select>
+                
+                <button id="generateBtn">생성하기</button>
+                <button id="stopBtn" disabled>중지</button>
+                <button id="clearBtn">지우기</button>
+            </div>
+        </div>
+
+        <div class="output-section">
+            <div class="status">
+                <span class="streaming-indicator" id="streamingIndicator">🔄 실시간 생성 중...</span>
+                <span class="token-counter" id="tokenCounter">토큰: 0</span>
+            </div>
+            <div class="output-box" id="outputBox">여기에 생성된 텍스트가 실시간으로 표시됩니다.</div>
+        </div>
+    </div>
+
+    <script>
+        let currentEventSource = null;
+        let tokenCount = 0;
+        
+        const promptInput = document.getElementById('promptInput');
+        const modelSelect = document.getElementById('modelSelect');
+        const generateBtn = document.getElementById('generateBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const outputBox = document.getElementById('outputBox');
+        const streamingIndicator = document.getElementById('streamingIndicator');
+        const tokenCounter = document.getElementById('tokenCounter');
+
+        generateBtn.addEventListener('click', startGeneration);
+        stopBtn.addEventListener('click', stopGeneration);
+        clearBtn.addEventListener('click', clearOutput);
+        
+        promptInput.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                startGeneration();
+            }
+        });
+
+        async function startGeneration() {
+            const prompt = promptInput.value.trim();
+            if (!prompt) {
+                alert('프롬프트를 입력해주세요.');
+                return;
+            }
+
+            setGeneratingState(true);
+            clearOutput();
+            tokenCount = 0;
+            updateTokenCounter();
+            
+            const payload = {
+                prompt: prompt,
+                stream: true,
+                max_length: 500
+            };
+            
+            if (modelSelect.value) {
+                payload.model_key = modelSelect.value;
+            }
+
+            try {
+                const response = await fetch('/api/v1/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'text/event-stream'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.slice(6));
+                                if (data.error) {
+                                    showError(data.error);
+                                    return;
+                                }
+                                if (data.content) {
+                                    appendToOutput(data.content);
+                                    tokenCount++;
+                                    updateTokenCounter();
+                                }
+                                if (data.done) {
+                                    setGeneratingState(false);
+                                    return;
+                                }
+                            } catch (e) {
+                                console.log('JSON parse error:', e);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                showError(`연결 오류: ${error.message}`);
+            } finally {
+                setGeneratingState(false);
+            }
+        }
+
+        function stopGeneration() {
+            if (currentEventSource) {
+                currentEventSource.close();
+                currentEventSource = null;
+            }
+            setGeneratingState(false);
+        }
+
+        function clearOutput() {
+            outputBox.textContent = '';
+            tokenCount = 0;
+            updateTokenCounter();
+        }
+
+        function appendToOutput(text) {
+            if (outputBox.textContent === '여기에 생성된 텍스트가 실시간으로 표시됩니다.') {
+                outputBox.textContent = '';
+            }
+            outputBox.textContent += text;
+            outputBox.scrollTop = outputBox.scrollHeight;
+        }
+
+        function showError(message) {
+            outputBox.textContent = `❌ 오류: ${message}`;
+            outputBox.className = 'output-box error';
+            setGeneratingState(false);
+        }
+
+        function setGeneratingState(isGenerating) {
+            generateBtn.disabled = isGenerating;
+            stopBtn.disabled = !isGenerating;
+            promptInput.disabled = isGenerating;
+            modelSelect.disabled = isGenerating;
+            
+            if (isGenerating) {
+                streamingIndicator.classList.add('active');
+                outputBox.className = 'output-box';
+            } else {
+                streamingIndicator.classList.remove('active');
+            }
+        }
+
+        function updateTokenCounter() {
+            tokenCounter.textContent = `토큰: ${tokenCount}`;
+        }
+
+        // 초기 샘플 프롬프트
+        promptInput.value = "Python의 주요 특징과 장점에 대해 자세히 설명해주세요.";
+    </script>
+</body>
+</html>
