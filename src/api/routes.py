@@ -92,7 +92,13 @@ async def generate_response(request: GenerateRequest):
         return {
             "response": response, 
             "prompt": request.prompt,
-            "model_info": handler.get_model_info()
+            "model_info": {
+                "model_key": handler.model_key,
+                "model_id": handler.SUPPORTED_MODELS[handler.model_key]["model_id"],
+                "description": handler.SUPPORTED_MODELS[handler.model_key]["description"],
+                "category": handler.SUPPORTED_MODELS[handler.model_key]["category"],
+                "loaded": handler.model is not None
+            }
         }
     except Exception as e:
         logger.error(f"생성 엔드포인트 오류: {e}")
@@ -106,7 +112,13 @@ async def chat_response(request: ChatRequest):
         return {
             "response": response, 
             "message": request.message,
-            "model_info": handler.get_model_info()
+            "model_info": {
+                "model_key": handler.model_key,
+                "model_id": handler.SUPPORTED_MODELS[handler.model_key]["model_id"],
+                "description": handler.SUPPORTED_MODELS[handler.model_key]["description"],
+                "category": handler.SUPPORTED_MODELS[handler.model_key]["category"],
+                "loaded": handler.model is not None
+            }
         }
     except Exception as e:
         logger.error(f"채팅 엔드포인트 오류: {e}")
@@ -132,7 +144,13 @@ async def rag_response(request: RAGRequest):
             "response": response, 
             "question": request.question,
             "relevant_documents": relevant_docs,
-            "model_info": service.llm_handler.get_model_info()
+            "model_info": {
+                "model_key": service.llm_handler.model_key,
+                "model_id": service.llm_handler.SUPPORTED_MODELS[service.llm_handler.model_key]["model_id"],
+                "description": service.llm_handler.SUPPORTED_MODELS[service.llm_handler.model_key]["description"],
+                "category": service.llm_handler.SUPPORTED_MODELS[service.llm_handler.model_key]["category"],
+                "loaded": service.llm_handler.model is not None
+            }
         }
     except Exception as e:
         logger.error(f"RAG 엔드포인트 오류: {e}")
@@ -164,7 +182,13 @@ async def update_rag_with_news(request: RAGUpdateRequest):
 async def health_check():
     current_model_info = None
     if llm_handler:
-        current_model_info = llm_handler.get_model_info()
+        current_model_info = {
+            "model_key": llm_handler.model_key,
+            "model_id": llm_handler.SUPPORTED_MODELS[llm_handler.model_key]["model_id"],
+            "description": llm_handler.SUPPORTED_MODELS[llm_handler.model_key]["description"],
+            "category": llm_handler.SUPPORTED_MODELS[llm_handler.model_key]["category"],
+            "loaded": llm_handler.model is not None
+        }
     
     return {
         "status": "healthy",
@@ -381,8 +405,8 @@ async def get_model_statistics():
         logger.error(f"모델 통계 조회 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/models/{model_key}")
-async def get_model_info(model_key: str):
+@router.get("/models/info/{model_key}")
+async def get_model_info_endpoint(model_key: str):
     """특정 모델 정보 반환"""
     model_info = LLMHandler.get_model_info(model_key)
     if not model_info:
@@ -406,14 +430,26 @@ async def switch_model(request: ModelSwitchRequest):
         # 기존 핸들러 정리
         old_model = None
         if llm_handler:
-            old_model = llm_handler.get_model_info()
+            old_model = {
+                "model_key": llm_handler.model_key,
+                "model_id": llm_handler.SUPPORTED_MODELS[llm_handler.model_key]["model_id"],
+                "description": llm_handler.SUPPORTED_MODELS[llm_handler.model_key]["description"],
+                "category": llm_handler.SUPPORTED_MODELS[llm_handler.model_key]["category"],
+                "loaded": llm_handler.model is not None
+            }
         
         # 새 모델로 전환
         logger.info(f"모델 전환 중: {request.model_key}")
         llm_handler = LLMHandler(model_key=request.model_key)
         rag_service = None  # RAG 서비스 재초기화 필요
         
-        new_model = llm_handler.get_model_info()
+        new_model = {
+            "model_key": llm_handler.model_key,
+            "model_id": llm_handler.SUPPORTED_MODELS[llm_handler.model_key]["model_id"],
+            "description": llm_handler.SUPPORTED_MODELS[llm_handler.model_key]["description"],
+            "category": llm_handler.SUPPORTED_MODELS[llm_handler.model_key]["category"],
+            "loaded": llm_handler.model is not None
+        }
         
         return {
             "message": "모델 전환 완료",

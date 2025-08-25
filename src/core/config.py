@@ -3,8 +3,8 @@ from pydantic import model_validator
 from typing import List
 
 class Settings(BaseSettings):
-    # 사용자가 선택할 수 있는 모델 목록
-    available_models: List[str] = ["qwen2.5-7b", "llama3-8b", "gpt-oss-20b"]
+    # 사용자가 선택할 수 있는 모델 목록 (3개로 제한)
+    available_models: List[str] = ["qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"]
     
     # 사용자가 선택한 모델
     selected_model: str = "qwen2.5-7b"

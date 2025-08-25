@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"C:\\Users\\geon1\\anaconda3\\envs\\llm_server\\python.exe\" -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121)",
+      "Bash(\"C:\\Users\\geon1\\anaconda3\\envs\\llm_server\\python.exe\" test_api.py)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

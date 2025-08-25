@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # FastAPI 서버 주소
-API_URL = "http://127.0.0.1:8000/api/v1"
+API_URL = "http://127.0.0.1:8001/api/v1"
 
 def handle_api_error(response):
     """
@@ -108,17 +108,31 @@ def update_rag_news(query, max_results):
 def update_model_list():
     """UI가 로드될 때 서버에서 모델 목록을 동적으로 가져옵니다."""
     logger.info("UI: 모델 목록을 서버에서 가져오는 중...")
+    
+    # 정적 모델 목록 (서버와 동기화)
+    default_models = ["qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"]
+    choices = ["기본 모델"] + default_models
+    
     try:
-        response = requests.get(f"{API_URL}/models", timeout=10)
-        response.raise_for_status()
-        models = list(response.json().get("supported_models", {}).keys())
-        choices = ["기본 모델"] + models
-        logger.info(f"UI: 모델 목록 업데이트 완료. 찾은 모델: {models}")
-        return gr.Dropdown(choices=choices, value="기본 모델"), gr.Dropdown(choices=choices, value="기본 모델"), gr.Dropdown(choices=choices, value="기본 모델")
+        response = requests.get(f"{API_URL}/models", timeout=5)
+        if response.status_code == 200:
+            server_models = list(response.json().get("supported_models", {}).keys())
+            if server_models:
+                choices = ["기본 모델"] + server_models
+                logger.info(f"UI: 서버에서 모델 목록 가져오기 성공: {server_models}")
+            else:
+                logger.warning("UI: 서버에서 빈 모델 목록을 받았습니다. 기본 목록 사용")
+        else:
+            logger.warning(f"UI: 서버 응답 실패 (HTTP {response.status_code}). 기본 목록 사용")
     except requests.exceptions.RequestException as e:
-        logger.error(f"UI: 서버에서 모델 목록을 가져오는 데 실패했습니다: {e}")
-        gr.Warning("서버에서 모델 목록을 가져오지 못했습니다. 백엔드 서버가 실행 중인지 확인하세요.")
-        return gr.Dropdown(choices=["기본 모델"], value="기본 모델"), gr.Dropdown(choices=["기본 모델"], value="기본 모델"), gr.Dropdown(choices=["기본 모델"], value="기본 모델")
+        logger.warning(f"UI: 서버 연결 실패, 기본 모델 목록 사용: {e}")
+    
+    logger.info(f"UI: 최종 모델 선택지: {choices}")
+    return (
+        gr.Dropdown(choices=choices, value="기본 모델"),
+        gr.Dropdown(choices=choices, value="기본 모델"), 
+        gr.Dropdown(choices=choices, value="기본 모델")
+    )
 
 # --- Gradio UI 구성 ---
 with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
@@ -131,7 +145,11 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
             with gr.Row():
                 with gr.Column(scale=2):
                     gen_prompt = gr.Textbox(lines=5, label="프롬프트", placeholder="인공지능의 미래에 대해 짧은 글을 써줘.")
-                    gen_model_select = gr.Dropdown(label="모델 선택 (UI 로딩 시 자동 업데이트)")
+                    gen_model_select = gr.Dropdown(
+                        label="모델 선택", 
+                        choices=["기본 모델", "qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"],
+                        value="기본 모델"
+                    )
                     gen_button = gr.Button("생성하기", variant="primary")
                 with gr.Column(scale=3):
                     gen_output = gr.Textbox(lines=10, label="생성된 텍스트", interactive=False)
@@ -139,11 +157,15 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
 
         # 2. 채팅 탭
         with gr.TabItem("💬 채팅"):
-            chat_model_select = gr.Dropdown(label="채팅 모델 선택 (UI 로딩 시 자동 업데이트)")
+            chat_model_select = gr.Dropdown(
+                label="채팅 모델 선택", 
+                choices=["기본 모델", "qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"],
+                value="기본 모델"
+            )
             gr.ChatInterface(
                 fn=chat_with_bot,
                 additional_inputs=[chat_model_select],
-                chatbot=gr.Chatbot(height=400, label="채팅창"),
+                chatbot=gr.Chatbot(height=400, label="채팅창", type="messages"),
                 textbox=gr.Textbox(placeholder="메시지를 입력하세요...", label="입력"),
                 submit_btn="보내기",
             )
@@ -162,7 +184,11 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
             with gr.Row():
                 with gr.Column(scale=2):
                     rag_question = gr.Textbox(lines=2, label="질문", placeholder="삼성전자의 최신 AI 기술에 대해 알려줘.")
-                    rag_model_select = gr.Dropdown(label="모델 선택 (UI 로딩 시 자동 업데이트)")
+                    rag_model_select = gr.Dropdown(
+                        label="모델 선택", 
+                        choices=["기본 모델", "qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"],
+                        value="기본 모델"
+                    )
                     rag_button = gr.Button("질문하기", variant="primary")
                 with gr.Column(scale=3):
                     rag_answer = gr.Textbox(lines=5, label="답변", interactive=False)
@@ -173,9 +199,6 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
     gen_button.click(fn=generate_text, inputs=[gen_prompt, gen_model_select], outputs=[gen_output, gen_model_info])
     rag_button.click(fn=rag_query, inputs=[rag_question, rag_model_select], outputs=[rag_answer, rag_docs, rag_model_info_output])
     update_button.click(fn=update_rag_news, inputs=[news_query, news_max_results], outputs=update_status)
-    
-    # UI가 브라우저에 로드될 때, update_model_list 함수를 실행하여 드롭다운 메뉴를 채웁니다.
-    gradio_ui.load(fn=update_model_list, inputs=None, outputs=[gen_model_select, chat_model_select, rag_model_select])
 
 if __name__ == "__main__":
     gradio_ui.launch()

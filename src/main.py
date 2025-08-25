@@ -5,9 +5,20 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import gradio as gr
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from api.routes import router
 from gradio_app import gradio_ui  # Gradio UI 임포트
 import logging
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting LLM FastAPI Server...")
+    logger.info("Gradio UI is available at http://<your-ip>:8001/ui")
+    logger.info("Server is ready!")
+    yield
+    # Shutdown
+    logger.info("Shutting down LLM FastAPI Server...")
 
 
 # Configure logging
@@ -17,7 +28,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="LLM FastAPI Server",
     description="FastAPI server for LLM, embedding, and RAG functionality",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Add CORS middleware
@@ -86,13 +98,8 @@ def read_root():
 # Gradio UI를 FastAPI 앱에 마운트
 app = gr.mount_gradio_app(app, gradio_ui, path="/ui")
 
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Starting LLM FastAPI Server...")
-    logger.info("Gradio UI is available at http://<your-ip>:8000/ui")
-    logger.info("Server is ready!")
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
