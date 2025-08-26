@@ -24,7 +24,10 @@ async def lifespan(app: FastAPI):
 
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -83,6 +86,13 @@ def read_root():
             },
             "시스템 정보": {
                 "gpu": "/api/v1/system/gpu"
+            },
+            "뉴스 기능": {
+                "latest_news": "/api/v1/news/latest",
+                "search_news": "/api/v1/news/search", 
+                "news_summary": "/api/v1/news/summary",
+                "news_analysis": "/api/v1/news/analysis",
+                "news_categories": "/api/v1/news/categories"
             },
             "문서": {
                 "docs": "/docs",

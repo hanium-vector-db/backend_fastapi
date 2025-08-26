@@ -11,6 +11,8 @@ from models.embedding_handler import EmbeddingHandler
 from services.rag_service import RAGService
 import logging
 import torch
+import json
+import asyncio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -52,6 +54,24 @@ class ModelRecommendationRequest(BaseModel):
 
 class PerformanceComparisonRequest(BaseModel):
     model_keys: list[str] = None
+
+# 새로운 뉴스 관련 요청 모델들
+class NewsSummaryRequest(BaseModel):
+    query: str
+    max_results: int = 5
+    summary_type: str = "comprehensive"  # brief, comprehensive, analysis
+    model_key: str = None
+
+class NewsAnalysisRequest(BaseModel):
+    categories: list[str] = None
+    max_results: int = 20
+    time_range: str = 'd'
+    model_key: str = None
+
+class LatestNewsRequest(BaseModel):
+    categories: list[str] = None
+    max_results: int = 10
+    time_range: str = 'd'
 
 # Initialize handlers (lazy loading)
 llm_handler = None
@@ -528,4 +548,451 @@ async def get_gpu_info():
         "gpu_count": torch.cuda.device_count(),
         "current_device": torch.cuda.current_device(),
         "gpu_info": gpu_info
+    }
+
+# === 새로운 뉴스 관련 API 엔드포인트들 ===
+
+@router.get("/news/latest")
+async def get_latest_news(
+    categories: str = None,  # 쉼표로 구분된 카테고리 문자열
+    max_results: int = 10,
+    time_range: str = 'd'
+):
+    """최신 뉴스를 조회합니다 (데이터베이스 저장 없이)"""
+    try:
+        from utils.helpers import search_latest_news
+        
+        # 카테고리 문자열을 리스트로 변환
+        category_list = None
+        if categories:
+            category_list = [cat.strip() for cat in categories.split(',')]
+        
+        logger.info(f"최신 뉴스 조회 - 카테고리: {category_list}, 결과수: {max_results}")
+        
+        news_results = search_latest_news(
+            max_results=max_results,
+            categories=category_list,
+            time_range=time_range
+        )
+        
+        return {
+            "news": news_results,
+            "total_count": len(news_results),
+            "categories": category_list or ["politics", "economy", "technology", "society"],
+            "time_range": time_range,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"최신 뉴스 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"최신 뉴스 조회 실패: {str(e)}")
+
+@router.post("/news/summary")
+async def summarize_news(request: NewsSummaryRequest):
+    """특정 주제의 뉴스를 검색하고 LLM으로 요약합니다 (스트리밍)"""
+    
+    async def generate_summary_stream():
+        try:
+            # 시작 신호
+            yield f"data: {json.dumps({'status': 'starting', 'message': '뉴스 요약을 시작합니다...'}, ensure_ascii=False)}\n\n"
+            
+            # RAG 서비스 대신 직접 LLM 핸들러 사용
+            llm = get_llm_handler(request.model_key)
+            
+            logger.info(f"뉴스 요약 요청 - 주제: {request.query}, 타입: {request.summary_type}")
+            logger.debug(f"LLM 핸들러 로드 완료: {llm.model_key}")
+            
+            yield f"data: {json.dumps({'status': 'searching', 'message': 'Tavily로 뉴스를 검색하는 중...'}, ensure_ascii=False)}\n\n"
+            
+            # 직접 뉴스 검색 및 요약
+            from utils.helpers import get_news_summary_with_tavily
+            
+            logger.debug("Tavily로 뉴스 검색 시작...")
+            news_data = get_news_summary_with_tavily(request.query, request.max_results)
+            logger.debug(f"뉴스 검색 완료. 수집된 기사 수: {len(news_data) if news_data else 0}")
+            
+            if not news_data:
+                no_news_message = f"'{request.query}' 관련 최신 뉴스를 찾을 수 없습니다."
+                final_data = {
+                    'status': 'completed', 
+                    'summary': no_news_message, 
+                    'articles': [], 
+                    'source_articles': [], 
+                    'query': request.query, 
+                    'summary_type': request.summary_type, 
+                    'total_articles': 0
+                }
+                yield f"data: {json.dumps(final_data, ensure_ascii=False)}\n\n"
+                return
+            
+            news_count = len(news_data)
+            yield f"data: {json.dumps({'status': 'processing', 'message': f'{news_count}개의 뉴스 기사를 분석하는 중...'}, ensure_ascii=False)}\n\n"
+            
+            # 요약 타입별 프롬프트 선택
+            summary_prompts = {
+                "brief": get_brief_summary_prompt(),
+                "comprehensive": get_comprehensive_summary_prompt(),
+                "analysis": get_analysis_summary_prompt()
+            }
+            
+            prompt_template = summary_prompts.get(request.summary_type, summary_prompts["comprehensive"])
+            
+            # 뉴스 데이터 준비
+            articles_text = "\n\n".join([
+                f"제목: {article.get('title', '')}\n출처: {article.get('url', 'Unknown')}\n내용: {article.get('content', '')[:1000]}"
+                for article in news_data[:request.max_results]
+                if not article.get('is_summary', False)  # Tavily의 자동 요약 제외
+            ])
+            
+            # 참고한 뉴스 기사 정보 준비 (응답용)
+            source_articles = []
+            for article in news_data[:request.max_results]:
+                if not article.get('is_summary', False):
+                    source_articles.append({
+                        'title': article.get('title', ''),
+                        'url': article.get('url', ''),
+                        'published_date': article.get('published_date', ''),
+                        'score': article.get('score', 0)
+                    })
+            
+            yield f"data: {json.dumps({'status': 'generating', 'message': 'LLM이 뉴스 요약을 생성하는 중...'}, ensure_ascii=False)}\n\n"
+            
+            # LLM으로 요약 생성
+            logger.debug(f"프롬프트 템플릿 준비 완료. 기사 텍스트 길이: {len(articles_text)} 문자")
+            full_prompt = prompt_template.format(query=request.query, articles=articles_text)
+            logger.debug(f"전체 프롬프트 길이: {len(full_prompt)} 문자")
+            
+            logger.info("LLM으로 뉴스 요약 생성 중...")
+            
+            # 스트리밍 모드로 생성
+            summary_stream = llm.generate(full_prompt, max_length=1024, stream=True)
+            
+            summary_parts = []
+            for chunk in summary_stream:
+                if chunk:
+                    summary_parts.append(chunk)
+                    yield f"data: {json.dumps({'status': 'streaming', 'chunk': chunk}, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.01)  # 약간의 지연으로 스트리밍 효과
+            
+            summary = ''.join(summary_parts)
+            logger.debug("LLM 요약 생성 완료")
+            
+            # 요약에 출처 정보 추가
+            summary_with_sources = summary + "\n\n" + "📰 **참고 기사:**\n" + "\n".join([
+                f"• [{article['title']}]({article['url']})" + (f" ({article['published_date']})" if article['published_date'] else "")
+                for article in source_articles[:5]  # 최대 5개 출처만 표시
+            ])
+            
+            # 완료 신호
+            final_result = {
+                "status": "completed",
+                "summary": summary_with_sources,
+                "articles": news_data[:request.max_results],
+                "source_articles": source_articles,
+                "query": request.query,
+                "summary_type": request.summary_type,
+                "total_articles": len(news_data),
+                "model_info": {
+                    "model_key": llm.model_key,
+                    "model_id": llm.SUPPORTED_MODELS[llm.model_key]["model_id"]
+                }
+            }
+            
+            yield f"data: {json.dumps(final_result, ensure_ascii=False)}\n\n"
+            
+        except Exception as e:
+            logger.error(f"뉴스 요약 오류: {e}")
+            error_msg = f'뉴스 요약 실패: {str(e)}'
+            yield f"data: {json.dumps({'status': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+    
+    return StreamingResponse(generate_summary_stream(), media_type="text/plain; charset=utf-8")
+
+def get_brief_summary_prompt():
+    """간단 요약용 프롬프트"""
+    return """다음 뉴스 기사들을 바탕으로 '{query}' 주제에 대한 간단한 요약을 작성해주세요.
+
+뉴스 기사들:
+{articles}
+
+요구사항:
+1. 핵심 내용을 2-3문장으로 간단히 요약
+2. 가장 중요한 포인트만 포함
+3. 명확하고 이해하기 쉽게 작성
+4. 한국어로 작성
+5. 출처 정보는 별도로 제공되므로 요약 본문에는 포함하지 마세요
+
+간단 요약:"""
+
+def get_comprehensive_summary_prompt():
+    """포괄적 요약용 프롬프트"""
+    return """다음 뉴스 기사들을 바탕으로 '{query}' 주제에 대한 포괄적인 요약을 작성해주세요.
+
+뉴스 기사들:
+{articles}
+
+다음 형식으로 작성해주세요:
+
+## 📰 주요 내용 요약
+(핵심 내용을 3-4문장으로 요약)
+
+## 🔍 세부 분석
+• 주요 이슈: 
+• 관련 인물/기관:
+• 영향/결과:
+
+## 🏷️ 키워드
+(관련 키워드 3-5개를 쉼표로 구분)
+
+## 📊 종합 평가
+(전반적인 상황 평가와 향후 전망 1-2문장)
+
+모든 내용을 한국어로 작성해주세요. 출처 정보는 별도로 제공되므로 요약 본문에는 포함하지 마세요."""
+
+def get_analysis_summary_prompt():
+    """분석 중심 요약용 프롬프트"""
+    return """다음 뉴스 기사들을 바탕으로 '{query}' 주제에 대한 심층 분석을 작성해주세요.
+
+뉴스 기사들:
+{articles}
+
+다음 형식으로 분석해주세요:
+
+## 🎯 핵심 이슈 분석
+(가장 중요한 이슈와 그 배경)
+
+## 📈 현황 및 트렌드
+• 현재 상황:
+• 변화 추이:
+• 주목할 점:
+
+## ⚡ 주요 동향
+• 긍정적 요소:
+• 우려사항:
+• 예상 시나리오:
+
+## 🌟 시사점 및 전망
+(이 뉴스가 갖는 의미와 향후 예상되는 발전 방향)
+
+## 🏷️ 핵심 키워드
+(분석에 중요한 키워드 5-7개)
+
+전문적이고 객관적인 시각으로 한국어로 작성해주세요. 출처 정보는 별도로 제공되므로 분석 본문에는 포함하지 마세요."""
+
+@router.post("/news/analysis")
+async def analyze_news_trends(request: NewsAnalysisRequest):
+    """여러 카테고리의 뉴스를 분석하여 트렌드를 파악합니다 (스트리밍)"""
+    
+    async def generate_analysis_stream():
+        try:
+            from utils.helpers import search_news
+            
+            # 시작 신호
+            yield f"data: {json.dumps({'status': 'starting', 'message': '뉴스 트렌드 분석을 시작합니다...'}, ensure_ascii=False)}\n\n"
+            
+            # LLM 핸들러 가져오기
+            handler = get_llm_handler(request.model_key)
+            
+            logger.info(f"뉴스 트렌드 분석 요청 - 카테고리: {request.categories}")
+            logger.debug(f"LLM 핸들러 로드 완료: {handler.model_key}")
+            
+            # 기본 카테고리 설정
+            categories = request.categories if request.categories else ['politics', 'economy', 'technology', 'society']
+            logger.debug(f"분석할 카테고리: {categories}")
+            
+            categories_text = ', '.join(categories)
+            yield f"data: {json.dumps({'status': 'categories', 'message': f'분석할 카테고리: {categories_text}'}, ensure_ascii=False)}\n\n"
+            
+            # 카테고리별 뉴스 수집
+            all_news = []
+            category_summaries = {}
+            
+            for i, category in enumerate(categories):
+                search_message = f'{category} 카테고리 뉴스 검색 중... ({i+1}/{len(categories)})'
+                yield f"data: {json.dumps({'status': 'searching', 'message': search_message}, ensure_ascii=False)}\n\n"
+                
+                logger.debug(f"'{category}' 카테고리 뉴스 검색 시작...")
+                category_news = search_news(
+                    "최신 뉴스", 
+                    max_results=request.max_results//len(categories), 
+                    category=category,
+                    time_range=request.time_range
+                )
+                logger.debug(f"'{category}' 카테고리 뉴스 {len(category_news) if category_news else 0}개 수집 완료")
+                
+                if category_news:
+                    all_news.extend(category_news)
+                    
+                    category_count = len(category_news)
+                    analyzing_message = f'{category} 카테고리 ({category_count}개 기사) 분석 중...'
+                    yield f"data: {json.dumps({'status': 'category_analyzing', 'message': analyzing_message}, ensure_ascii=False)}\n\n"
+                    
+                    # 카테고리별 간단 요약
+                    category_text = "\n".join([
+                        f"• {news.get('title', '')}: {news.get('content', '')[:200]}"
+                        for news in category_news[:3]
+                    ])
+                    
+                    category_prompt = f"다음 {category} 카테고리 뉴스들의 주요 트렌드를 한 문장으로 요약해주세요:\n{category_text}"
+                    category_summary = handler.generate(category_prompt, max_length=256)
+                    category_summaries[category] = category_summary
+                    
+                    yield f"data: {json.dumps({'status': 'category_completed', 'category': category, 'summary': category_summary}, ensure_ascii=False)}\n\n"
+            
+            total_news = len(all_news)
+            overall_message = f'총 {total_news}개 기사로 전체 트렌드 분석 중...'
+            yield f"data: {json.dumps({'status': 'overall_analyzing', 'message': overall_message}, ensure_ascii=False)}\n\n"
+            
+            # 전체 트렌드 분석 프롬프트
+            trend_analysis_prompt = """다음 뉴스 제목들과 카테고리별 요약을 바탕으로 현재 뉴스 트렌드를 분석해주세요.
+
+뉴스 제목들:
+{titles}
+
+카테고리별 요약:
+{category_summaries}
+
+다음 형식으로 트렌드를 분석해주세요:
+
+## 🔥 오늘의 주요 트렌드
+(가장 주목받는 이슈 2-3개)
+
+## 📊 분야별 동향
+• 정치: (정치 관련 주요 이슈)
+• 경제: (경제 관련 주요 이슈)  
+• 사회: (사회 관련 주요 이슈)
+• 기술: (기술 관련 주요 이슈)
+
+## 🎭 여론 및 관심도
+(국민들이 가장 관심 갖는 이슈들과 여론의 방향)
+
+## 🔮 주목할 포인트
+(앞으로 계속 주목해야 할 이슈들)
+
+객관적이고 균형잡힌 시각으로 한국어로 작성해주세요. 출처 정보는 별도로 제공되므로 분석 본문에는 포함하지 마세요."""
+            
+            all_titles = [news.get('title', '') for news in all_news]
+            titles_text = "\n".join([f"• {title}" for title in all_titles[:30]])
+            
+            full_trend_prompt = trend_analysis_prompt.format(
+                titles=titles_text,
+                category_summaries="\n".join([f"{cat}: {summary}" for cat, summary in category_summaries.items()])
+            )
+            
+            logger.info("전체 트렌드 분석을 위한 LLM 생성 중...")
+            
+            # 스트리밍 모드로 분석 생성
+            trend_stream = handler.generate(full_trend_prompt, max_length=1024, stream=True)
+            
+            analysis_parts = []
+            for chunk in trend_stream:
+                if chunk:
+                    analysis_parts.append(chunk)
+                    yield f"data: {json.dumps({'status': 'streaming', 'chunk': chunk}, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.01)
+            
+            trend_response = ''.join(analysis_parts)
+            logger.debug("전체 트렌드 분석 완료")
+            
+            # 분석에 사용된 주요 뉴스 출처 정보 준비
+            top_articles = sorted(all_news, key=lambda x: x.get('score', 0), reverse=True)[:10]
+            source_info = "\n\n📰 **분석 기반 주요 뉴스:**\n" + "\n".join([
+                f"• [{article.get('title', 'Unknown')}]({article.get('url', '#')})" + 
+                (f" ({article.get('published_date', '')})" if article.get('published_date') else "")
+                for article in top_articles[:5]
+            ])
+            
+            trend_response_with_sources = trend_response + source_info
+            
+            # 완료 신호
+            final_result = {
+                "status": "completed",
+                "overall_trend": trend_response_with_sources,
+                "category_trends": category_summaries,
+                "total_articles_analyzed": len(all_news),
+                "categories": categories,
+                "time_range": request.time_range,
+                "analyzed_articles": [
+                    {
+                        'title': article.get('title', ''),
+                        'url': article.get('url', ''),
+                        'category': article.get('category', 'general'),
+                        'published_date': article.get('published_date', ''),
+                        'score': article.get('score', 0)
+                    } for article in top_articles[:10]
+                ],
+                "model_info": {
+                    "model_key": handler.model_key,
+                    "model_id": handler.SUPPORTED_MODELS[handler.model_key]["model_id"]
+                }
+            }
+            
+            yield f"data: {json.dumps(final_result, ensure_ascii=False)}\n\n"
+            
+        except Exception as e:
+            logger.error(f"뉴스 트렌드 분석 오류: {e}")
+            analysis_error_msg = f'뉴스 트렌드 분석 실패: {str(e)}'
+            yield f"data: {json.dumps({'status': 'error', 'message': analysis_error_msg}, ensure_ascii=False)}\n\n"
+    
+    return StreamingResponse(generate_analysis_stream(), media_type="text/plain; charset=utf-8")
+
+@router.get("/news/search")
+async def search_news_endpoint(
+    query: str,
+    max_results: int = 5,
+    category: str = None,
+    time_range: str = 'd'
+):
+    """특정 키워드로 뉴스를 검색합니다"""
+    try:
+        from utils.helpers import search_news
+        
+        logger.info(f"뉴스 검색 요청 - 쿼리: {query}, 카테고리: {category}")
+        
+        news_results = search_news(
+            query=query,
+            max_results=max_results,
+            category=category,
+            time_range=time_range
+        )
+        
+        return {
+            "news": news_results,
+            "total_count": len(news_results),
+            "query": query,
+            "category": category,
+            "time_range": time_range,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"뉴스 검색 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"뉴스 검색 실패: {str(e)}")
+
+@router.get("/news/categories")
+async def get_news_categories():
+    """지원되는 뉴스 카테고리 목록을 반환합니다"""
+    categories = {
+        "politics": "정치",
+        "economy": "경제", 
+        "technology": "기술/IT",
+        "sports": "스포츠",
+        "health": "건강/의료",
+        "culture": "문화/예술",
+        "society": "사회",
+        "international": "국제/해외"
+    }
+    
+    return {
+        "categories": categories,
+        "supported_time_ranges": {
+            "d": "1일",
+            "w": "1주", 
+            "m": "1달"
+        },
+        "supported_summary_types": {
+            "brief": "간단 요약",
+            "comprehensive": "포괄적 요약",
+            "analysis": "심층 분석"
+        },
+        "status": "success"
     }

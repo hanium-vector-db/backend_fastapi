@@ -29,6 +29,7 @@ gradio
 
 # 웹 검색
 duckduckgo-search
+tavily-python
 
 # 시스템 모니터링
 psutil

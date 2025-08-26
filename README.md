@@ -8,6 +8,7 @@ Retrieval-Augmented Generation (RAG) 기능과 **실시간 스트리밍**을 갖
 - **3개 고성능 LLM 모델**: 4bit 양자화를 통한 메모리 최적화
 - **🌐 이중 UI 지원**: Gradio UI + 전용 스트리밍 웹 페이지
 - **RAG (검색 증강 생성)**: 지능적인 문서 검색 및 컨텍스트 인식 응답
+- **🆕 Tavily 뉴스 기능**: 실시간 뉴스 검색, AI 요약, 트렌드 분석
 - **임베딩 생성**: BGE-M3 모델을 사용한 텍스트 임베딩 생성
 - **채팅 인터페이스**: 대화 컨텍스트를 유지하는 대화형 채팅 기능
 - **RESTful API**: 자동 OpenAPI 문서화가 포함된 잘 문서화된 API 엔드포인트
@@ -154,9 +155,21 @@ curl -X POST "http://localhost:8001/api/v1/generate" \
 | | `/api/v1/chat` | POST | LLM과 채팅 | ✅ |
 | | `/api/v1/embed` | POST | 텍스트 임베딩 생성 | - |
 | | `/api/v1/rag` | POST | RAG 기반 질의응답 | - |
-| **모델 관리** | `/api/v1/models` | GET | 지원되는 모든 모델 목록 조회 | - |
-| | `/api/v1/models/switch` | POST | 현재 사용 중인 모델 전환 | - |
+| | `/api/v1/rag/update-news` | POST | 웹 뉴스로 RAG DB 업데이트 | - |
+| **🆕 뉴스 기능** | `/api/v1/news/latest` | GET | 최신 뉴스 조회 | - |
+| | `/api/v1/news/search` | GET | 뉴스 검색 | - |
+| | `/api/v1/news/summary` | POST | AI 뉴스 요약 | - |
+| | `/api/v1/news/analysis` | POST | 뉴스 트렌드 분석 | - |
+| | `/api/v1/news/categories` | GET | 뉴스 카테고리 조회 | - |
+| **모델 관리** | `/api/v1/models` | GET | 지원되는 3개 모델 목록 조회 | - |
+| | `/api/v1/models/categories` | GET | 모델 카테고리 정보 | - |
+| | `/api/v1/models/category/{category}` | GET | 특정 카테고리의 모델들 | - |
 | | `/api/v1/models/recommend` | POST | 시스템 사양 맞춤 모델 추천 | - |
+| | `/api/v1/models/compare` | POST | 모델 성능 비교 | - |
+| | `/api/v1/models/search` | GET | 모델 검색 및 필터링 | - |
+| | `/api/v1/models/stats` | GET | 모델 통계 정보 | - |
+| | `/api/v1/models/switch` | POST | 현재 사용 중인 모델 전환 | - |
+| | `/api/v1/models/info/{model_key}` | GET | 특정 모델 상세 정보 | - |
 | **시스템 정보** | `/api/v1/system/gpu` | GET | GPU 메모리 및 사용량 정보 | - |
 
 ## 🤖 지원 모델 (3개)
@@ -225,6 +238,34 @@ curl -X GET "http://localhost:8001/api/v1/health"
 
 # GPU 정보 확인
 curl -X GET "http://localhost:8001/api/v1/system/gpu"
+
+# 모델 검색
+curl -X GET "http://localhost:8001/api/v1/models/search?keyword=korean"
+
+# 모델 통계
+curl -X GET "http://localhost:8001/api/v1/models/stats"
+```
+
+### 🆕 7. 뉴스 기능 사용 예시
+```bash
+# 최신 뉴스 조회
+curl -X GET "http://localhost:8001/api/v1/news/latest?categories=technology,economy&max_results=5"
+
+# 뉴스 검색
+curl -X GET "http://localhost:8001/api/v1/news/search?query=ChatGPT&category=technology"
+
+# AI 뉴스 요약
+curl -X POST "http://localhost:8001/api/v1/news/summary" \
+     -H "Content-Type: application/json" \
+     -d '{"query": "인공지능 ChatGPT", "summary_type": "comprehensive", "max_results": 5}'
+
+# 뉴스 트렌드 분석
+curl -X POST "http://localhost:8001/api/v1/news/analysis" \
+     -H "Content-Type: application/json" \
+     -d '{"categories": ["politics", "economy", "technology"], "max_results": 15}'
+
+# 지원 카테고리 조회
+curl -X GET "http://localhost:8001/api/v1/news/categories"
 ```
 
 ## ⚙️ 설정
@@ -234,6 +275,7 @@ curl -X GET "http://localhost:8001/api/v1/system/gpu"
 | 변수 | 설명 | 기본값 |
 |------|------|--------|
 | `HUGGINGFACE_TOKEN` | Hugging Face API 토큰 | 필수 |
+| `TAVILY_API_KEY` | Tavily 뉴스 검색 API 토큰 | 선택 (뉴스 기능용) |
 | `MODEL_ID` | 기본 LLM 모델 식별자 | `qwen2.5-7b` |
 | `EMBEDDING_MODEL` | 임베딩 모델 이름 | `BAAI/bge-m3` |
 
@@ -308,11 +350,23 @@ docker-compose up -d
 - 실시간 스트리밍: [http://localhost:8001/stream](http://localhost:8001/stream) ⚡
 - Gradio UI: [http://localhost:8001/ui](http://localhost:8001/ui)
 
-## 🎉 최신 업데이트 (v2.1)
+## 🎉 최신 업데이트 (v2.2)
 
-### ✨ 새로운 기능
+### ✨ 새로운 기능 (v2.2)
+- **🆕 Tavily 뉴스 통합**: Tavily API 기반 실시간 뉴스 검색 시스템
+- **🤖 AI 뉴스 요약**: LLM을 이용한 지능형 뉴스 요약 (3가지 타입)
+  - 간단 요약 (`brief`): 2-3문장 핵심 요약
+  - 포괄적 요약 (`comprehensive`): 구조화된 상세 분석
+  - 심층 분석 (`analysis`): 전문적 시각의 트렌드 분석
+- **📊 뉴스 트렌드 분석**: 여러 카테고리 뉴스의 종합적 트렌드 파악
+- **🗂️ 카테고리별 뉴스 검색**: 8개 카테고리 지원 (정치, 경제, 기술, 스포츠 등)
+- **⏰ 시간대별 뉴스 조회**: 최근 1일/1주/1달 뉴스 필터링
+- **🔍 스마트 뉴스 검색**: 키워드 기반 정확한 뉴스 검색
+- **📋 5개 새로운 API 엔드포인트**: 완전한 뉴스 기능 API 세트
+
+### 🔧 기존 기능 (v2.1)
 - **🔥 실시간 스트리밍**: Server-Sent Events 기반 토큰별 실시간 텍스트 생성
-- **🌐 전용 스트리밍 UI**: JavaScript 기반 현대적 웹 인터페이스 
+- **🌐 전용 스트리밍 UI**: JavaScript 기반 현대적 웹 인터페이스
 - **⚡ 성능 최적화**: Attention mask 최적화 및 메모리 효율성 개선
 - **🧪 통합 테스트**: 포괄적인 테스트 스위트 포함
 - **📱 반응형 디자인**: 모바일/데스크톱 친화적 사용자 경험

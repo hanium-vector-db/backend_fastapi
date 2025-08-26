@@ -10,11 +10,13 @@
 
 ## 🔥 주요 기능
 
-- **40개 이상의 다양한 로컬 언어 모델 지원**
+- **3개의 고성능 로컬 언어 모델 지원**
 - **실시간 스트리밍 텍스트 생성**
-- **한국어, 코딩, 수학 특화 모델**
+- **한국어, 코딩, 다국어 지원**
 - **RAG (검색 증강 생성) 기능**
-- **GPU 메모리 최적화**
+- **🆕 Tavily 기반 실시간 뉴스 검색 및 요약**
+- **🆕 AI 뉴스 트렌드 분석**
+- **GPU 메모리 최적화 (4bit 양자화)**
 - **실시간 모델 전환**
 
 ---
@@ -31,24 +33,17 @@ GET /
 {
   "message": "🚀 LLM FastAPI 서버에 오신 것을 환영합니다!",
   "version": "1.0.0",
-  "description": "40개 이상의 다양한 로컬 언어 모델을 지원하는 고성능 AI 서버",
+  "description": "3개의 고성능 로컬 언어 모델을 지원하는 AI 서버",
   "features": [
-    "다양한 크기의 LLM 모델 지원 (0.5B-72B)",
-    "한국어, 코딩, 수학 특화 모델",
+    "3개 고성능 LLM 모델 지원 (Qwen 2.5, Llama 3.1, Gemma 2)",
+    "한국어, 코딩, 다국어 지원",
     "RAG (검색 증강 생성) 기능",
     "실시간 모델 전환",
     "GPU 메모리 최적화"
   ],
   "endpoints": { ... },
   "supported_model_categories": [
-    "ultra-light (0.5B)",
-    "light (1-3B)", 
-    "medium (7-13B)",
-    "large (14B+)",
-    "korean (한국어 특화)",
-    "code (코딩 특화)",
-    "math (수학/과학 특화)",
-    "multilingual (다국어 지원)"
+    "medium (7-9B) - 현재 지원되는 모든 모델"
   ]
 }
 ```
@@ -167,7 +162,7 @@ POST /api/v1/embed
 
 ## 📚 RAG (검색 증강 생성) API
 
-### RAG 질의
+### 1. RAG 질의
 ```http
 POST /api/v1/rag
 ```
@@ -175,28 +170,56 @@ POST /api/v1/rag
 **요청 본문:**
 ```json
 {
-  "query": "Python의 장점은 무엇인가요?",
-  "k": 3,
-  "stream": false
+  "question": "Python의 장점은 무엇인가요?",
+  "model_key": "qwen2.5-7b"
 }
 ```
 
 **매개변수:**
-- `query` (string, 필수): 검색할 질의
-- `k` (integer, 기본값: 3): 검색할 문서 개수
-- `stream` (boolean, 기본값: false): 스트리밍 모드
+- `question` (string, 필수): 검색할 질의
+- `model_key` (string, 선택): 사용할 모델 키
 
-**응답:**
+### 2. RAG 데이터베이스 업데이트
+```http
+POST /api/v1/rag/update-news
+```
+
+**요청 본문:**
 ```json
 {
-  "answer": "Python의 주요 장점들은 다음과 같습니다...",
-  "sources": [
+  "query": "Python 최신 뉴스",
+  "max_results": 5
+}
+```
+
+**매개변수:**
+- `query` (string, 필수): 검색할 쿼리
+- `max_results` (integer, 기본값: 5): 최대 결과 개수
+
+**RAG 질의 응답:**
+```json
+{
+  "response": "Python의 주요 장점들은 다음과 같습니다...",
+  "question": "Python의 장점은 무엇인가요?",
+  "relevant_documents": [
     {
       "content": "Python은 가독성이 뛰어난 언어입니다...",
       "score": 0.95
     }
   ],
-  "model": "qwen2.5-7b"
+  "model_info": {
+    "model_key": "qwen2.5-7b",
+    "model_id": "Qwen/Qwen2.5-7B-Instruct",
+    "loaded": true
+  }
+}
+```
+
+**RAG 업데이트 응답:**
+```json
+{
+  "message": "5개의 문서가 성공적으로 추가되었습니다.",
+  "added_chunks": 12
 }
 ```
 
@@ -240,7 +263,8 @@ GET /api/v1/models
       "performance_score": 82,
       "use_cases": ["general", "multilingual"]
     }
-  }
+  },
+  "total_models": 3
 }
 ```
 
@@ -252,7 +276,13 @@ GET /api/v1/models/categories
 **응답:**
 ```json
 {
-  "categories": ["medium"]
+  "categories": ["medium"],
+  "models_by_category": {
+    "medium": ["qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"]
+  },
+  "category_descriptions": {
+    "medium": "7-20GB RAM, 성능과 효율의 균형"
+  }
 }
 ```
 
@@ -262,6 +292,28 @@ GET /api/v1/models/category/{category}
 ```
 
 **예시:** `/api/v1/models/category/medium`
+
+**응답:**
+```json
+{
+  "category": "medium",
+  "models": {
+    "qwen2.5-7b": {
+      "model_id": "Qwen/Qwen2.5-7B-Instruct",
+      "description": "Qwen 2.5 7B - 고성능 범용 모델"
+    },
+    "llama3.1-8b": {
+      "model_id": "meta-llama/Meta-Llama-3-8B-Instruct", 
+      "description": "Meta Llama 3 8B - 고성능 모델"
+    },
+    "gemma-3-4b": {
+      "model_id": "google/gemma-2-9b-it",
+      "description": "Google Gemma 2 9B - 효율적인 중형 모델"
+    }
+  },
+  "count": 3
+}
+```
 
 ### 4. 모델 추천
 ```http
@@ -336,6 +388,170 @@ GET /api/v1/models/info/{model_key}
 
 ---
 
+## 📰 뉴스 API (NEW!)
+
+### 1. 최신 뉴스 조회
+```http
+GET /api/v1/news/latest
+```
+
+**쿼리 파라미터:**
+- `categories` (string, 선택): 쉼표로 구분된 카테고리 (예: "technology,economy")
+- `max_results` (integer, 기본값: 10): 최대 결과 수
+- `time_range` (string, 기본값: "d"): 시간 범위 (d=1일, w=1주, m=1달)
+
+**예시:**
+```
+GET /api/v1/news/latest?categories=technology,economy&max_results=5
+```
+
+**응답:**
+```json
+{
+  "news": [
+    {
+      "title": "AI 기술 최신 동향",
+      "url": "https://example.com/ai-news",
+      "content": "AI 기술이 급속도로 발전하고 있습니다...",
+      "category": "technology",
+      "published_date": "2025-01-20T10:00:00Z",
+      "score": 0.95
+    }
+  ],
+  "total_count": 5,
+  "categories": ["technology", "economy"],
+  "time_range": "d",
+  "status": "success"
+}
+```
+
+### 2. 뉴스 검색
+```http
+GET /api/v1/news/search
+```
+
+**쿼리 파라미터:**
+- `query` (string, 필수): 검색 키워드
+- `max_results` (integer, 기본값: 5): 최대 결과 수
+- `category` (string, 선택): 검색할 카테고리
+- `time_range` (string, 기본값: "d"): 시간 범위
+
+**예시:**
+```
+GET /api/v1/news/search?query=ChatGPT&category=technology&max_results=3
+```
+
+### 3. AI 뉴스 요약
+```http
+POST /api/v1/news/summary
+```
+
+**요청 본문:**
+```json
+{
+  "query": "인공지능 ChatGPT",
+  "max_results": 5,
+  "summary_type": "comprehensive",
+  "model_key": "qwen2.5-7b"
+}
+```
+
+**매개변수:**
+- `query` (string, 필수): 요약할 뉴스 주제
+- `max_results` (integer, 기본값: 5): 분석할 뉴스 개수
+- `summary_type` (string, 기본값: "comprehensive"): 요약 타입
+  - `"brief"`: 간단 요약 (2-3문장)
+  - `"comprehensive"`: 포괄적 요약 (구조화된 상세 요약)
+  - `"analysis"`: 심층 분석 (전문적 분석)
+- `model_key` (string, 선택): 사용할 LLM 모델
+
+**응답:**
+```json
+{
+  "summary": "## 📰 주요 내용 요약\nChatGPT 관련 최신 뉴스를 분석한 결과...\n\n## 🔍 세부 분석\n• 주요 이슈: AI 기술 발전\n• 관련 인물/기관: OpenAI, Microsoft\n• 영향/결과: 업계 변화 가속화",
+  "articles": [
+    {
+      "title": "ChatGPT 최신 업데이트",
+      "content": "ChatGPT가 새로운 기능을 추가했습니다...",
+      "url": "https://example.com/chatgpt-update"
+    }
+  ],
+  "query": "인공지능 ChatGPT",
+  "summary_type": "comprehensive",
+  "total_articles": 5,
+  "model_info": {
+    "model_key": "qwen2.5-7b",
+    "model_id": "Qwen/Qwen2.5-7B-Instruct"
+  },
+  "status": "success"
+}
+```
+
+### 4. 뉴스 트렌드 분석
+```http
+POST /api/v1/news/analysis
+```
+
+**요청 본문:**
+```json
+{
+  "categories": ["politics", "economy", "technology"],
+  "max_results": 20,
+  "time_range": "d",
+  "model_key": "qwen2.5-7b"
+}
+```
+
+**응답:**
+```json
+{
+  "overall_trend": "## 🔥 오늘의 주요 트렌드\n1. AI 기술 발전 가속화\n2. 경제 회복 신호\n\n## 📊 분야별 동향\n• 정치: 정책 변화 논의\n• 경제: 시장 회복세\n• 기술: AI 혁신 지속",
+  "category_trends": {
+    "politics": "정치권에서 AI 규제 논의가 활발해지고 있습니다.",
+    "economy": "기술주 중심으로 시장이 회복세를 보이고 있습니다.",
+    "technology": "AI 기술 발전이 각종 산업에 미치는 영향이 커지고 있습니다."
+  },
+  "total_articles_analyzed": 18,
+  "categories": ["politics", "economy", "technology"],
+  "time_range": "d",
+  "status": "success"
+}
+```
+
+### 5. 뉴스 카테고리 조회
+```http
+GET /api/v1/news/categories
+```
+
+**응답:**
+```json
+{
+  "categories": {
+    "politics": "정치",
+    "economy": "경제",
+    "technology": "기술/IT",
+    "sports": "스포츠",
+    "health": "건강/의료",
+    "culture": "문화/예술",
+    "society": "사회",
+    "international": "국제/해외"
+  },
+  "supported_time_ranges": {
+    "d": "1일",
+    "w": "1주",
+    "m": "1달"
+  },
+  "supported_summary_types": {
+    "brief": "간단 요약",
+    "comprehensive": "포괄적 요약", 
+    "analysis": "심층 분석"
+  },
+  "status": "success"
+}
+```
+
+---
+
 ## 💻 시스템 정보 API
 
 ### GPU 정보 조회
@@ -348,8 +564,18 @@ GET /api/v1/system/gpu
 {
   "gpu_available": true,
   "gpu_count": 1,
-  "gpu_memory": "8GB",
-  "cuda_version": "11.8"
+  "current_device": 0,
+  "gpu_info": [
+    {
+      "device_id": 0,
+      "name": "NVIDIA GeForce RTX 3080",
+      "total_memory_gb": 8.0,
+      "allocated_memory_gb": 2.5,
+      "cached_memory_gb": 3.2,
+      "free_memory_gb": 4.8,
+      "compute_capability": "8.6"
+    }
+  ]
 }
 ```
 
@@ -410,7 +636,62 @@ GET /redoc
 
 ## 📝 사용 예시
 
-### Python으로 API 호출
+### 🆕 새로운 뉴스 기능 사용 예시
+
+#### Python으로 뉴스 요약 API 호출
+```python
+import requests
+
+# AI 뉴스 요약 요청
+response = requests.post("http://localhost:8001/api/v1/news/summary", 
+    json={
+        "query": "ChatGPT 인공지능",
+        "max_results": 5,
+        "summary_type": "comprehensive",
+        "model_key": "qwen2.5-7b"
+    }
+)
+
+result = response.json()
+print("📰 뉴스 요약:")
+print(result["summary"])
+print(f"\n📊 분석 기사 수: {result['total_articles']}")
+```
+
+#### 최신 뉴스 조회
+```python
+# 기술/경제 카테고리 최신 뉴스 조회
+response = requests.get("http://localhost:8001/api/v1/news/latest", 
+    params={
+        "categories": "technology,economy",
+        "max_results": 8,
+        "time_range": "d"
+    }
+)
+
+news_data = response.json()
+print(f"📰 총 {news_data['total_count']}개 최신 뉴스:")
+for news in news_data["news"]:
+    print(f"• {news['title']} ({news['category']})")
+```
+
+#### 뉴스 트렌드 분석
+```python
+# 오늘의 뉴스 트렌드 분석
+response = requests.post("http://localhost:8001/api/v1/news/analysis",
+    json={
+        "categories": ["politics", "economy", "technology"],
+        "max_results": 15,
+        "time_range": "d"
+    }
+)
+
+analysis = response.json()
+print("🔥 오늘의 뉴스 트렌드:")
+print(analysis["overall_trend"])
+```
+
+### Python으로 기존 API 호출
 ```python
 import requests
 import json
