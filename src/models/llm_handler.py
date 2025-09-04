@@ -105,11 +105,12 @@ class LLMHandler:
                 else:
                     self.tokenizer.pad_token = "[PAD]" if "[PAD]" in self.tokenizer.vocab else self.tokenizer.unk_token
             
-            # 모델 로드 (C:\ 디렉토리에 캐시)
+            # 모델 로드 (새로운 디렉토리에 캐시)
+            # 단일 GPU 사용을 위해 device_map을 cuda:0으로 고정
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_id,
                 quantization_config=quantization_config,
-                device_map="auto",
+                device_map="cuda:0",  # 단일 GPU 사용
                 torch_dtype=torch.float16,
                 trust_remote_code=True,
                 cache_dir=cache_dir,

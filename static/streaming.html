@@ -144,7 +144,8 @@
     </div>
 
     <script>
-        let currentEventSource = null;
+        let currentAbortController = null;
+        let currentReader = null;
         let tokenCount = 0;
         
         const promptInput = document.getElementById('promptInput');
@@ -178,6 +179,14 @@
             tokenCount = 0;
             updateTokenCounter();
             
+            // 이전 요청이 있으면 중단
+            if (currentAbortController) {
+                currentAbortController.abort();
+            }
+            
+            // 새 AbortController 생성
+            currentAbortController = new AbortController();
+            
             const payload = {
                 prompt: prompt,
                 stream: true,
@@ -194,7 +203,8 @@
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                signal: currentAbortController.signal
             })
             .then(response => {
                 if (!response.ok) {
@@ -202,15 +212,17 @@
                 }
                 
                 // ReadableStream을 사용한 스트리밍 처리
-                const reader = response.body.getReader();
+                currentReader = response.body.getReader();
                 const decoder = new TextDecoder();
                 
                 function readStream() {
-                    return reader.read().then(({ done, value }) => {
+                    return currentReader.read().then(({ done, value }) => {
                         console.log('Stream read - done:', done, 'value length:', value ? value.length : 0);
                         
                         if (done) {
                             console.log('Stream completed');
+                            currentAbortController = null;
+                            currentReader = null;
                             setGeneratingState(false);
                             return;
                         }
@@ -252,6 +264,8 @@
                                     
                                     if (data.done) {
                                         console.log('Stream done signal received');
+                                        currentAbortController = null;
+                                        currentReader = null;
                                         setGeneratingState(false);
                                         return;
                                     }
@@ -272,17 +286,37 @@
             })
             .catch(error => {
                 console.error('Streaming error:', error);
-                showError(`연결 오류: ${error.message}`);
+                if (error.name === 'AbortError') {
+                    console.log('Request was aborted');
+                    showError('생성이 중단되었습니다.');
+                } else {
+                    showError(`연결 오류: ${error.message}`);
+                }
+                currentAbortController = null;
+                currentReader = null;
                 setGeneratingState(false);
             });
         }
 
         function stopGeneration() {
-            if (currentEventSource) {
-                currentEventSource.close();
-                currentEventSource = null;
+            console.log('Stop button clicked');
+            
+            // AbortController로 요청 중단
+            if (currentAbortController) {
+                console.log('Aborting current request');
+                currentAbortController.abort();
+                currentAbortController = null;
             }
+            
+            // Reader 닫기
+            if (currentReader) {
+                console.log('Canceling current reader');
+                currentReader.cancel();
+                currentReader = null;
+            }
+            
             setGeneratingState(false);
+            console.log('Generation stopped');
         }
 
         function clearOutput() {

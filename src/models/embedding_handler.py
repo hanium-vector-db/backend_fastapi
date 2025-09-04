@@ -21,13 +21,14 @@ class EmbeddingHandler:
             logger.info(f"임베딩 모델 로딩 중: {self.model_name}")
             # 새로운 디렉토리에 캐시
             cache_dir = "/home/ubuntu_euphoria/.huggingface_models"
-            self.model = SentenceTransformer(self.model_name, cache_folder=cache_dir)
+            # 단일 GPU 사용을 위해 device를 cuda:0으로 고정
+            self.model = SentenceTransformer(self.model_name, cache_folder=cache_dir, device='cuda:0')
             
             # LangChain과 호환되는 임베딩 클래스 생성
             from langchain_huggingface import HuggingFaceEmbeddings
             self.embeddings = HuggingFaceEmbeddings(
                 model_name=self.model_name,
-                model_kwargs={'device': 'cuda' if self.model.device.type == 'cuda' else 'cpu'},
+                model_kwargs={'device': 'cuda:0'},  # 단일 GPU 고정
                 cache_folder=cache_dir
             )
             
