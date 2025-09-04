@@ -13,7 +13,6 @@ Retrieval-Augmented Generation (RAG) 기능과 실시간 스트리밍을 갖춘 
 - **채팅 인터페이스**: 대화 컨텍스트를 유지하는 대화형 채팅 기능
 - **RESTful API**: 자동 OpenAPI 문서화가 포함된 잘 문서화된 API 엔드포인트
 - **Docker 지원**: 쉬운 확장을 위한 컨테이너화된 배포
-- **단일 GPU 최적화**: GPU 0번 고정 사용으로 메모리 효율성 향상
 
 ## 실행 환경 요구사항
 
@@ -26,14 +25,9 @@ Retrieval-Augmented Generation (RAG) 기능과 실시간 스트리밍을 갖춘 
 - **저장공간**: 50GB 이상 (모델 파일 포함)
 
 ### 소프트웨어 요구사항
-- **운영체제**: Linux (Ubuntu 20.04+ 권장), Windows 10/11, macOS 12+
+- **운영체제**: Linux (Ubuntu 20.04+ 권장)
 - **Python**: 3.11.x (필수)
 - **CUDA**: 12.1 이상
-- **Git**: 최신 버전
-
-### 네트워크 요구사항
-- **인터넷 연결**: 모델 다운로드 및 Hugging Face API 접근용
-- **방화벽**: 포트 8001 (HTTP), 7860 (Gradio UI) 개방
 
 ## 프로젝트 구조
 
@@ -71,12 +65,6 @@ llm-fastapi-server/
 
 ## 🔧 설치
 
-### 사전 요구사항
-
-- Python 3.11+ (권장: 3.11.x)
-- Anaconda 또는 Miniconda (환경 복원용)
-- CUDA 호환 GPU (권장: 8GB+ VRAM)
-- Git
 
 ### 설정
 
@@ -89,7 +77,7 @@ llm-fastapi-server/
 2. **가상 환경 생성**
    ```bash
    python -m venv venv
-   source venv/bin/activate  # Windows: venv\Scripts\activate
+   source venv/bin/activate 
    ```
 
 3. **환경 설정**
@@ -433,9 +421,6 @@ curl -X GET "http://localhost:8001/api/v1/news/categories"
 
 전체 API 명세서는 다음 방법으로 확인할 수 있습니다:
 
-- **대화형 API 문서**: `http://localhost:8001/docs`
-- **ReDoc 문서**: `http://localhost:8001/redoc`
-- **OpenAPI 스키마**: `http://localhost:8001/openapi.json`
 - **API 명세 문서**: [API.md](./API.md) 파일 참조
 
 ## 테스트
@@ -534,15 +519,3 @@ docker-compose up -d
 
 ### 이슈 및 버그 리포트
 GitHub Issues: https://github.com/hanium-vector-db/AWS_LOCAL_LLM/issues
-
-### 감사의 말
-
-- [Hugging Face](https://huggingface.co/) - 모델 호스팅 및 라이브러리 제공
-- [FastAPI](https://fastapi.tiangolo.com/) - 현대적인 웹 프레임워크
-- [LangChain](https://langchain.com/) - RAG 기능 구현 지원
-- [Gradio](https://gradio.app/) - 직관적인 UI 프레임워크
-- [Tavily](https://tavily.com/) - 실시간 뉴스 검색 API
-
----
-
-**참고**: 이 서버는 교육 및 개발 목적으로 설계되었습니다. 프로덕션 환경에서 사용할 경우 적절한 보안 조치, 인증, 로드 밸런싱 등을 구성하시기 바랍니다.
