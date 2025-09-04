@@ -1,20 +1,41 @@
-# 🤖 LLM FastAPI 서버
+# LLM FastAPI 서버
 
-Retrieval-Augmented Generation (RAG) 기능과 **실시간 스트리밍**을 갖춘 대형 언어 모델(LLM) 배포를 위한 프로덕션 준비 완료 FastAPI 서버입니다. 3개의 엄선된 고성능 모델을 지원합니다.
+Retrieval-Augmented Generation (RAG) 기능과 실시간 스트리밍을 갖춘 대형 언어 모델(LLM) 배포를 위한 프로덕션 준비 완료 FastAPI 서버입니다. 3개의 고성능 모델과 다양한 AI 기능을 제공합니다.
 
-## ✨ 주요 기능
+## 주요 기능
 
-- **🔥 실시간 스트리밍**: Server-Sent Events를 통한 토큰별 실시간 텍스트 생성
+- **실시간 스트리밍**: Server-Sent Events를 통한 토큰별 실시간 텍스트 생성
 - **3개 고성능 LLM 모델**: 4bit 양자화를 통한 메모리 최적화
-- **🌐 이중 UI 지원**: Gradio UI + 전용 스트리밍 웹 페이지
+- **이중 UI 지원**: Gradio UI + 전용 스트리밍 웹 페이지
 - **RAG (검색 증강 생성)**: 지능적인 문서 검색 및 컨텍스트 인식 응답
-- **🆕 Tavily 뉴스 기능**: 실시간 뉴스 검색, AI 요약, 트렌드 분석
+- **Tavily 뉴스 기능**: 실시간 뉴스 검색, AI 요약, 트렌드 분석
 - **임베딩 생성**: BGE-M3 모델을 사용한 텍스트 임베딩 생성
 - **채팅 인터페이스**: 대화 컨텍스트를 유지하는 대화형 채팅 기능
 - **RESTful API**: 자동 OpenAPI 문서화가 포함된 잘 문서화된 API 엔드포인트
 - **Docker 지원**: 쉬운 확장을 위한 컨테이너화된 배포
+- **단일 GPU 최적화**: GPU 0번 고정 사용으로 메모리 효율성 향상
 
-## 🏗️ 프로젝트 구조
+## 실행 환경 요구사항
+
+### 하드웨어 요구사항
+- **CPU**: Intel/AMD 64-bit 프로세서 (8코어 이상 권장)
+- **RAM**: 최소 16GB (32GB 이상 권장)
+- **GPU**: NVIDIA GPU with CUDA support
+  - 최소 8GB VRAM (RTX 3070, RTX 4060 Ti 이상)
+  - 권장 12GB VRAM (RTX 3080, RTX 4070 Ti 이상)
+- **저장공간**: 50GB 이상 (모델 파일 포함)
+
+### 소프트웨어 요구사항
+- **운영체제**: Linux (Ubuntu 20.04+ 권장), Windows 10/11, macOS 12+
+- **Python**: 3.11.x (필수)
+- **CUDA**: 12.1 이상
+- **Git**: 최신 버전
+
+### 네트워크 요구사항
+- **인터넷 연결**: 모델 다운로드 및 Hugging Face API 접근용
+- **방화벽**: 포트 8001 (HTTP), 7860 (Gradio UI) 개방
+
+## 프로젝트 구조
 
 ```
 llm-fastapi-server/
@@ -143,34 +164,174 @@ curl -X POST "http://localhost:8001/api/v1/generate" \
      -d '{"prompt": "Python의 장점에 대해 설명해주세요", "stream": true}'
 ```
 
-#### 사용 가능한 엔드포인트:
+## API 엔드포인트
 
-| 카테고리 | 엔드포인트 | 메소드 | 설명 | 스트리밍 지원 |
-|----------|-----------|--------|------|-------------|
-| **UI 인터페이스** | `/stream` | GET | 실시간 스트리밍 전용 페이지 | ✅ |
-| | `/ui` | GET | Gradio 통합 인터페이스 | ⚡ |
-| **기본 기능** | `/` | GET | 환영 메시지 및 엔드포인트 개요 | - |
-| | `/api/v1/health` | GET | 상태 확인 및 서비스 상태 | - |
-| | `/api/v1/generate` | POST | LLM을 사용한 텍스트 생성 | ✅ |
-| | `/api/v1/chat` | POST | LLM과 채팅 | ✅ |
-| | `/api/v1/embed` | POST | 텍스트 임베딩 생성 | - |
-| | `/api/v1/rag` | POST | RAG 기반 질의응답 | - |
-| | `/api/v1/rag/update-news` | POST | 웹 뉴스로 RAG DB 업데이트 | - |
-| **🆕 뉴스 기능** | `/api/v1/news/latest` | GET | 최신 뉴스 조회 | - |
-| | `/api/v1/news/search` | GET | 뉴스 검색 | - |
-| | `/api/v1/news/summary` | POST | AI 뉴스 요약 | - |
-| | `/api/v1/news/analysis` | POST | 뉴스 트렌드 분석 | - |
-| | `/api/v1/news/categories` | GET | 뉴스 카테고리 조회 | - |
-| **모델 관리** | `/api/v1/models` | GET | 지원되는 3개 모델 목록 조회 | - |
-| | `/api/v1/models/categories` | GET | 모델 카테고리 정보 | - |
-| | `/api/v1/models/category/{category}` | GET | 특정 카테고리의 모델들 | - |
-| | `/api/v1/models/recommend` | POST | 시스템 사양 맞춤 모델 추천 | - |
-| | `/api/v1/models/compare` | POST | 모델 성능 비교 | - |
-| | `/api/v1/models/search` | GET | 모델 검색 및 필터링 | - |
-| | `/api/v1/models/stats` | GET | 모델 통계 정보 | - |
-| | `/api/v1/models/switch` | POST | 현재 사용 중인 모델 전환 | - |
-| | `/api/v1/models/info/{model_key}` | GET | 특정 모델 상세 정보 | - |
-| **시스템 정보** | `/api/v1/system/gpu` | GET | GPU 메모리 및 사용량 정보 | - |
+### 기본 엔드포인트
+
+| 메소드 | 엔드포인트 | 설명 | 스트리밍 지원 |
+|--------|-----------|------|-------------|
+| GET | `/` | 환영 메시지 및 서비스 개요 | - |
+| GET | `/stream` | 실시간 스트리밍 웹 페이지 | ✅ |
+| GET | `/ui` | Gradio 통합 인터페이스 | - |
+| GET | `/api/v1/health` | 서버 상태 및 모델 정보 확인 | - |
+
+### 텍스트 생성
+
+#### POST `/api/v1/generate`
+LLM을 사용한 텍스트 생성 (스트리밍 지원)
+
+**요청 본문:**
+```json
+{
+    "prompt": "Python의 장점에 대해 설명해주세요",
+    "max_length": 512,
+    "model_key": "qwen2.5-7b",
+    "stream": true
+}
+```
+
+**응답 (스트리밍):**
+```
+data: {"content": "Python은", "done": false}
+data: {"content": " 간결하고", "done": false}
+data: {"content": "", "done": true}
+```
+
+**응답 (일반):**
+```json
+{
+    "response": "Python은 간결하고 읽기 쉬운 문법을 가진 프로그래밍 언어입니다...",
+    "prompt": "Python의 장점에 대해 설명해주세요",
+    "model_info": {
+        "model_key": "qwen2.5-7b",
+        "model_id": "Qwen/Qwen2.5-7B-Instruct",
+        "description": "Qwen 2.5 7B - 고성능 범용 모델"
+    }
+}
+```
+
+#### POST `/api/v1/chat`
+대화형 채팅 (스트리밍 지원)
+
+**요청 본문:**
+```json
+{
+    "message": "안녕하세요!",
+    "model_key": "llama3.1-8b",
+    "stream": true
+}
+```
+
+### 임베딩 생성
+
+#### POST `/api/v1/embed`
+텍스트 임베딩 벡터 생성
+
+**요청 본문:**
+```json
+{
+    "text": "임베딩으로 변환할 텍스트"
+}
+```
+
+**응답:**
+```json
+{
+    "embedding": [0.1, -0.2, 0.3, ...],
+    "dimension": 1024,
+    "model_info": {
+        "model_name": "BAAI/bge-m3",
+        "embedding_dimension": 1024
+    }
+}
+```
+
+### RAG (검색 증강 생성)
+
+#### POST `/api/v1/rag`
+문서 기반 질의응답
+
+**요청 본문:**
+```json
+{
+    "question": "AI 기술의 최신 동향은?",
+    "model_key": "qwen2.5-7b"
+}
+```
+
+#### POST `/api/v1/rag/update-news`
+최신 뉴스로 RAG 데이터베이스 업데이트
+
+### 뉴스 기능
+
+#### GET `/api/v1/news/latest`
+최신 뉴스 조회
+
+**쿼리 매개변수:**
+- `categories`: 카테고리 (쉼표로 구분) - `technology,economy,politics`
+- `max_results`: 최대 결과 수 (1-20)
+- `time_range`: 시간 범위 (`d`, `w`, `m`)
+
+#### GET `/api/v1/news/search`
+키워드로 뉴스 검색
+
+#### POST `/api/v1/news/summary`
+AI 뉴스 요약 (스트리밍 지원)
+
+#### POST `/api/v1/news/analysis`
+뉴스 트렌드 분석 (스트리밍 지원)
+
+#### GET `/api/v1/models`
+지원하는 모델 목록 조회
+
+#### POST `/api/v1/models/switch`
+현재 사용 중인 모델 전환
+
+#### POST `/api/v1/models/recommend`
+시스템 사양 맞춤 모델 추천
+
+### 시스템 정보
+
+#### GET `/api/v1/system/gpu`
+GPU 메모리 및 사용량 정보
+
+**응답:**
+```json
+{
+    "gpu_available": true,
+    "gpu_count": 1,
+    "gpu_memory": {
+        "total": 12288,
+        "used": 8192,
+        "free": 4096
+    },
+    "gpu_utilization": 65.5,
+    "cuda_version": "12.1"
+}
+```
+
+## 설정
+
+### 환경 변수
+
+| 변수명 | 설명 | 기본값 | 필수 여부 |
+|--------|------|--------|----------|
+| `HUGGINGFACE_TOKEN` | Hugging Face API 토큰 | - | 필수 |
+| `TAVILY_API_KEY` | Tavily 뉴스 검색 API 키 | - | 선택 (뉴스 기능용) |
+| `MODEL_ID` | 기본 LLM 모델 식별자 | `qwen2.5-7b` | 선택 |
+| `EMBEDDING_MODEL` | 임베딩 모델 이름 | `BAAI/bge-m3` | 선택 |
+| `CUDA_VISIBLE_DEVICES` | 사용할 GPU 디바이스 | `0` | 선택 |
+
+### 모델 저장 위치
+
+모든 Hugging Face 모델은 `~/.huggingface_models/`에 자동으로 다운로드 및 캐시됩니다.
+
+### GPU 설정
+
+시스템은 단일 GPU (CUDA:0) 사용으로 최적화되어 있습니다:
+- `CUDA_VISIBLE_DEVICES=0` 환경변수로 GPU 0번만 사용
+- 모든 모델이 `cuda:0` 디바이스에 로드됨
+- 병렬 처리 대신 메모리 효율적인 단일 GPU 처리
 
 ## 🤖 지원 모델 (3개)
 
@@ -268,120 +429,120 @@ curl -X POST "http://localhost:8001/api/v1/news/analysis" \
 curl -X GET "http://localhost:8001/api/v1/news/categories"
 ```
 
-## ⚙️ 설정
+## API 명세서
 
-### 환경 변수
+전체 API 명세서는 다음 방법으로 확인할 수 있습니다:
 
-| 변수 | 설명 | 기본값 |
-|------|------|--------|
-| `HUGGINGFACE_TOKEN` | Hugging Face API 토큰 | 필수 |
-| `TAVILY_API_KEY` | Tavily 뉴스 검색 API 토큰 | 선택 (뉴스 기능용) |
-| `MODEL_ID` | 기본 LLM 모델 식별자 | `qwen2.5-7b` |
-| `EMBEDDING_MODEL` | 임베딩 모델 이름 | `BAAI/bge-m3` |
+- **대화형 API 문서**: `http://localhost:8001/docs`
+- **ReDoc 문서**: `http://localhost:8001/redoc`
+- **OpenAPI 스키마**: `http://localhost:8001/openapi.json`
+- **API 명세 문서**: [API.md](./API.md) 파일 참조
 
-### 모델 저장 위치
+## 테스트
 
-모든 모델은 `C:\huggingface_models\`에 자동으로 다운로드 및 캐시됩니다.
-
-## 🧪 테스트
-
-프로젝트에는 다양한 테스트 스크립트가 포함되어 있습니다:
-
-### 단독 모델 테스트
+### 기본 기능 테스트
 ```bash
-python test_qwen.py
+# 모델 단독 테스트
+python debug_py/test_qwen.py
+
+# API 기능 테스트
+python debug_py/test_api.py
+
+# 스트리밍 기능 테스트
+python debug_py/test_streaming.py
+
+# 뉴스 기능 테스트
+python debug_py/test_news_features.py
 ```
 
-### API 기능 테스트
+### 토큰 설정 확인
 ```bash
-python test_api.py
+# Hugging Face 토큰 확인
+python debug_py/setup_hf_token.py
+
+# Llama 모델 접근 권한 확인
+python debug_py/check_llama_access.py
 ```
 
-### 스트리밍 기능 테스트
-```bash
-python test_streaming.py
-```
+## 문제 해결
 
-## 🐳 Docker 배포
+### 일반적인 문제
 
-### 이미지 빌드
+**CUDA Out of Memory 오류**
+- GPU 메모리 확인: `nvidia-smi`
+- 더 작은 모델 사용 또는 max_length 값 감소
+
+**Hugging Face 토큰 오류**
+- 토큰 재설정: `export HUGGINGFACE_TOKEN="your_new_token"`
+- 토큰 권한 확인: https://huggingface.co/settings/tokens
+
+**모델 다운로드 실패**
+- 네트워크 연결 확인: `curl -I https://huggingface.co`
+- 캐시 디렉토리 권한 확인: `ls -la ~/.huggingface_models/`
+
+**포트 충돌**
+- 포트 사용 확인: `netstat -tlnp | grep :8001`
+- 다른 포트 사용: `uvicorn src.main:app --port 8002`
+
+## Docker 배포
+
+### 기본 배포
 ```bash
+# 이미지 빌드
 docker build -t llm-fastapi-server .
-```
 
-### 컨테이너 실행
-```bash
-docker run -p 8001:8001 \
+# 컨테이너 실행
+docker run -d \
+  --name llm-server \
+  --gpus all \
+  -p 8001:8001 \
   -e HUGGINGFACE_TOKEN="your_token" \
-  -v $(pwd)/data:/app/data \
+  -e TAVILY_API_KEY="your_api_key" \
+  -v ~/.huggingface_models:/root/.huggingface_models \
   llm-fastapi-server
 ```
 
-### 프로덕션 배포
+### Docker Compose 배포
 ```bash
+# 환경 변수 설정
+cp .env.example .env
+# .env 파일 편집
+
+# 서비스 시작
 docker-compose up -d
 ```
 
-## 🤝 기여하기
+## 기여하기
 
 1. 저장소 포크
 2. 기능 브랜치 생성 (`git checkout -b feature/amazing-feature`)
 3. 변경사항 커밋 (`git commit -m 'Add amazing feature'`)
 4. 브랜치에 푸시 (`git push origin feature/amazing-feature`)
-5. Pull Request 열기
+5. Pull Request 생성
 
-## 📝 라이선스
+## 라이선스
 
-이 프로젝트는 MIT 라이선스 하에 라이선스가 부여됩니다.
+이 프로젝트는 MIT 라이선스 하에 배포됩니다. 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.
 
-## 🙏 감사의 말
+## 지원
 
-- [Hugging Face](https://huggingface.co/) - 우수한 모델 호스팅
-- [FastAPI](https://fastapi.tiangolo.com/) - 놀라운 웹 프레임워크
-- [LangChain](https://langchain.com/) - RAG 기능 제공
+### 문서 및 도움말
+- **API 명세서**: [API.md](./API.md)
+- **대화형 API 문서**: http://localhost:8001/docs
+- **실시간 스트리밍 테스트**: http://localhost:8001/stream
+- **Gradio UI**: http://localhost:8001/ui
+
+### 이슈 및 버그 리포트
+GitHub Issues: https://github.com/hanium-vector-db/AWS_LOCAL_LLM/issues
+
+### 감사의 말
+
+- [Hugging Face](https://huggingface.co/) - 모델 호스팅 및 라이브러리 제공
+- [FastAPI](https://fastapi.tiangolo.com/) - 현대적인 웹 프레임워크
+- [LangChain](https://langchain.com/) - RAG 기능 구현 지원
 - [Gradio](https://gradio.app/) - 직관적인 UI 프레임워크
-
-## 📞 지원
-
-질문 및 지원:
-- 이 저장소에서 이슈 생성
-- **📋 [API 명세서](./API.md)** - 완전한 API 문서
-- 서버 실행 시 [Swagger UI](http://localhost:8001/docs) 확인
-- 실시간 스트리밍: [http://localhost:8001/stream](http://localhost:8001/stream) ⚡
-- Gradio UI: [http://localhost:8001/ui](http://localhost:8001/ui)
-
-## 🎉 최신 업데이트 (v2.2)
-
-### ✨ 새로운 기능 (v2.2)
-- **🆕 Tavily 뉴스 통합**: Tavily API 기반 실시간 뉴스 검색 시스템
-- **🤖 AI 뉴스 요약**: LLM을 이용한 지능형 뉴스 요약 (3가지 타입)
-  - 간단 요약 (`brief`): 2-3문장 핵심 요약
-  - 포괄적 요약 (`comprehensive`): 구조화된 상세 분석
-  - 심층 분석 (`analysis`): 전문적 시각의 트렌드 분석
-- **📊 뉴스 트렌드 분석**: 여러 카테고리 뉴스의 종합적 트렌드 파악
-- **🗂️ 카테고리별 뉴스 검색**: 8개 카테고리 지원 (정치, 경제, 기술, 스포츠 등)
-- **⏰ 시간대별 뉴스 조회**: 최근 1일/1주/1달 뉴스 필터링
-- **🔍 스마트 뉴스 검색**: 키워드 기반 정확한 뉴스 검색
-- **📋 5개 새로운 API 엔드포인트**: 완전한 뉴스 기능 API 세트
-
-### 🔧 기존 기능 (v2.1)
-- **🔥 실시간 스트리밍**: Server-Sent Events 기반 토큰별 실시간 텍스트 생성
-- **🌐 전용 스트리밍 UI**: JavaScript 기반 현대적 웹 인터페이스
-- **⚡ 성능 최적화**: Attention mask 최적화 및 메모리 효율성 개선
-- **🧪 통합 테스트**: 포괄적인 테스트 스위트 포함
-- **📱 반응형 디자인**: 모바일/데스크톱 친화적 사용자 경험
-- **📊 터미널 로깅**: 생성된 답변을 터미널에서 실시간 확인
-- **🔄 자동 리로드**: 코드 변경시 서버 자동 재시작 (`--reload` 옵션)
-- **📋 완전한 API 문서**: 상세한 API 명세서 (API.md) 제공
-
-### 🛠️ 기술적 개선
-- `TextIteratorStreamer`를 이용한 실시간 스트리밍 구현
-- FastAPI `StreamingResponse` 지원
-- JavaScript `fetch` API를 이용한 클라이언트 구현
-- 개선된 오류 처리 및 로깅
-- Llama 모델 토크나이저 padding 토큰 최적화
-- 스트리밍 터미널 출력 간소화
+- [Tavily](https://tavily.com/) - 실시간 뉴스 검색 API
 
 ---
 
-**참고**: 이 서버는 교육 및 개발 목적으로 설계되었습니다. 프로덕션 배포의 경우 적절한 보안 조치, 인증 및 확장 구성을 보장하세요.
+**참고**: 이 서버는 교육 및 개발 목적으로 설계되었습니다. 프로덕션 환경에서 사용할 경우 적절한 보안 조치, 인증, 로드 밸런싱 등을 구성하시기 바랍니다.
