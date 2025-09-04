@@ -35,7 +35,7 @@ def check_llama_access():
         tokenizer = AutoTokenizer.from_pretrained(
             model_id,
             token=token,
-            cache_dir="C:\\huggingface_models"
+            cache_dir="/home/ubuntu_euphoria/.huggingface_models"
         )
         
         print("SUCCESS! Llama 3.1에 접근할 수 있습니다!")

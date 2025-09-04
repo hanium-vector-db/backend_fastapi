@@ -63,7 +63,7 @@ def check_llama_access(token):
         tokenizer = AutoTokenizer.from_pretrained(
             model_id,
             token=token,
-            cache_dir="C:\\huggingface_models"
+            cache_dir="/home/ubuntu_euphoria/.huggingface_models"
         )
         
         print("✅ Llama 3.1 접근 권한 확인됨!")

@@ -113,18 +113,26 @@ async def generate_response(request: GenerateRequest):
         handler = get_llm_handler(request.model_key)
         
         if request.stream:
-            # 스트리밍 응답
-            def generate_stream():
+            # 스트리밍 응답 (SSE 형식)
+            async def generate_stream():
+                import asyncio
                 for chunk in handler.generate(request.prompt, request.max_length, stream=True):
-                    yield chunk
+                    if chunk:
+                        # SSE 형식으로 데이터 포맷팅
+                        data = json.dumps({"content": chunk, "done": False}, ensure_ascii=False)
+                        yield f"data: {data}\n\n"
+                        await asyncio.sleep(0)  # 즉시 yield하도록 함
+                # 완료 신호
+                final_data = json.dumps({"content": "", "done": True})
+                yield f"data: {final_data}\n\n"
             
             return StreamingResponse(
                 generate_stream(), 
-                media_type="text/plain",
+                media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "Content-Type": "text/event-stream"
+                    "X-Accel-Buffering": "no"  # nginx 버퍼링 방지
                 }
             )
         else:
@@ -151,18 +159,23 @@ async def chat_response(request: ChatRequest):
         handler = get_llm_handler(request.model_key)
         
         if request.stream:
-            # 스트리밍 응답
-            def chat_stream():
+            # 스트리밍 응답 (SSE 형식)
+            async def chat_stream():
                 for chunk in handler.chat_generate(request.message, stream=True):
-                    yield chunk
+                    if chunk:
+                        # SSE 형식으로 데이터 포맷팅
+                        data = json.dumps({"content": chunk, "done": False})
+                        yield f"data: {data}\n\n"
+                # 완료 신호
+                final_data = json.dumps({"content": "", "done": True})
+                yield f"data: {final_data}\n\n"
             
             return StreamingResponse(
                 chat_stream(), 
-                media_type="text/plain",
+                media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "Content-Type": "text/event-stream"
+                    "Connection": "keep-alive"
                 }
             )
         else:

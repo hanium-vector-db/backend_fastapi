@@ -21,7 +21,7 @@ def main():
         )
         
         # 토크나이저 로드
-        cache_dir = "C:\\huggingface_models"
+        cache_dir = "/home/ubuntu_euphoria/.huggingface_models"
         tokenizer = AutoTokenizer.from_pretrained(
             model_id,
             cache_dir=cache_dir
