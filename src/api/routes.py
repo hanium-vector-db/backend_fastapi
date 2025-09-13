@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from models.llm_handler import LLMHandler
 from models.embedding_handler import EmbeddingHandler
 from services.rag_service import RAGService
+from services.internal_db_service import InternalDBService
 import logging
 import torch
 import json
@@ -73,10 +74,36 @@ class LatestNewsRequest(BaseModel):
     max_results: int = 10
     time_range: str = 'd'
 
+# External-Web RAG 요청 모델들
+class ExternalWebUploadRequest(BaseModel):
+    topic: str
+    max_results: int = 20
+
+class ExternalWebQueryRequest(BaseModel):
+    prompt: str
+    top_k: int = 5
+    model_key: str = None
+
+# Internal-DBMS RAG 요청 모델들
+class InternalDBIngestRequest(BaseModel):
+    table: str = "knowledge"
+    save_name: str = "knowledge"
+    simulate: bool = False
+    id_col: str = None
+    title_col: str = None
+    text_cols: list[str] = None
+
+class InternalDBQueryRequest(BaseModel):
+    save_name: str = "knowledge"
+    question: str
+    top_k: int = 5
+    margin: float = 0.12
+
 # Initialize handlers (lazy loading)
 llm_handler = None
 embedding_handler = None
 rag_service = None
+internal_db_service = None
 
 def get_llm_handler(model_key: str = None):
     global llm_handler
@@ -106,6 +133,15 @@ def get_rag_service(model_key: str = None):
         emb = get_embedding_handler()
         rag_service = RAGService(llm, emb)
     return rag_service
+
+def get_internal_db_service():
+    global internal_db_service
+    if internal_db_service is None:
+        logger.info("Internal DB 서비스 초기화 중...")
+        llm = get_llm_handler()
+        emb = get_embedding_handler()
+        internal_db_service = InternalDBService(llm, emb)
+    return internal_db_service
 
 @router.post("/generate")
 async def generate_response(request: GenerateRequest):
@@ -1009,3 +1045,156 @@ async def get_news_categories():
         },
         "status": "success"
     }
+
+# === External-Web RAG API 엔드포인트들 ===
+
+@router.post("/external-web/upload-topic")
+async def external_web_upload_topic(request: ExternalWebUploadRequest):
+    """외부 웹 검색을 통해 특정 주제의 정보를 벡터 DB에 저장합니다"""
+    try:
+        service = get_rag_service()
+        added_chunks, message = service.add_documents_from_web(request.topic, request.max_results)
+        
+        if added_chunks > 0:
+            return {
+                "success": True,
+                "message": message,
+                "topic": request.topic,
+                "added_chunks": added_chunks,
+                "max_results": request.max_results
+            }
+        else:
+            raise HTTPException(status_code=404, detail=message)
+            
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"External-Web 업로드 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"External-Web 업로드 실패: {str(e)}")
+
+@router.post("/external-web/rag-query")
+async def external_web_rag_query(request: ExternalWebQueryRequest):
+    """외부 웹 정보를 기반으로 한 RAG 질의응답"""
+    try:
+        service = get_rag_service(request.model_key)
+        
+        # 벡터 DB에서 관련 문서 검색
+        relevant_docs = service.get_relevant_documents(request.prompt, request.top_k)
+        
+        if not relevant_docs:
+            return {
+                "response": "외부 웹 검색 기반 지식베이스에서 충분한 결과를 찾지 못했습니다. 먼저 관련 주제를 업로드해주세요.",
+                "prompt": request.prompt,
+                "relevant_documents": [],
+                "source": "external-web"
+            }
+        
+        # RAG 응답 생성
+        response = service.generate_response(request.prompt)
+        
+        return {
+            "response": response,
+            "prompt": request.prompt,
+            "relevant_documents": relevant_docs[:request.top_k],
+            "source": "external-web",
+            "model_info": {
+                "model_key": service.llm_handler.model_key,
+                "model_id": service.llm_handler.SUPPORTED_MODELS[service.llm_handler.model_key]["model_id"],
+                "description": service.llm_handler.SUPPORTED_MODELS[service.llm_handler.model_key]["description"],
+                "category": service.llm_handler.SUPPORTED_MODELS[service.llm_handler.model_key]["category"],
+                "loaded": service.llm_handler.model is not None
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"External-Web RAG 질의 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"External-Web RAG 질의 실패: {str(e)}")
+
+# === Internal-DBMS RAG API 엔드포인트들 ===
+
+@router.get("/internal-db/tables")
+async def get_internal_db_tables():
+    """내부 데이터베이스의 테이블 목록을 조회합니다"""
+    try:
+        service = get_internal_db_service()
+        tables = await service.get_db_tables()
+        
+        return {
+            "tables": tables,
+            "total_count": len(tables),
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"DB 테이블 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"DB 테이블 조회 실패: {str(e)}")
+
+@router.post("/internal-db/ingest")
+async def internal_db_ingest(request: InternalDBIngestRequest):
+    """내부 데이터베이스 테이블을 벡터화하여 FAISS 인덱스를 생성합니다"""
+    try:
+        service = get_internal_db_service()
+        result = await service.ingest_table(
+            table_name=request.table,
+            save_name=request.save_name,
+            simulate=request.simulate,
+            id_col=request.id_col,
+            title_col=request.title_col,
+            text_cols=request.text_cols
+        )
+        
+        return {
+            "ok": True,
+            "save_dir": result["save_dir"],
+            "rows": result["rows"],
+            "chunks": result["chunks"],
+            "schema": result["schema"],
+            "table": request.table,
+            "simulate": request.simulate
+        }
+        
+    except Exception as e:
+        logger.error(f"Internal DB 인제스트 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal DB 인제스트 실패: {str(e)}")
+
+@router.post("/internal-db/query")
+async def internal_db_query(request: InternalDBQueryRequest):
+    """내부 데이터베이스 기반 RAG 질의응답"""
+    try:
+        service = get_internal_db_service()
+        result = await service.query(
+            save_name=request.save_name,
+            question=request.question,
+            top_k=request.top_k,
+            margin=request.margin
+        )
+        
+        return {
+            "answer": result["answer"],
+            "sources": result["sources"],
+            "question": request.question,
+            "save_name": request.save_name,
+            "top_k": request.top_k,
+            "margin": request.margin
+        }
+        
+    except Exception as e:
+        logger.error(f"Internal DB 질의 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal DB 질의 실패: {str(e)}")
+
+@router.get("/internal-db/status")
+async def get_internal_db_status():
+    """내부 DB FAISS 인덱스 상태를 확인합니다"""
+    try:
+        service = get_internal_db_service()
+        status = await service.get_status()
+        
+        return {
+            "faiss_indices": status["faiss_indices"],
+            "cache_keys": status["cache_keys"],
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logger.error(f"Internal DB 상태 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal DB 상태 조회 실패: {str(e)}")

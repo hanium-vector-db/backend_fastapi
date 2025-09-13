@@ -4,13 +4,15 @@ import json
 import logging
 import time
 import re
+from utils.config_loader import config
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# FastAPI 서버 주소
-API_URL = "http://127.0.0.1:8001/api/v1"
+# FastAPI 서버 주소 - 설정에서 읽어옴
+backend_api_config = config.ui_backend_api_config
+API_URL = backend_api_config['base_url']
 
 def process_streaming_response(response):
     """
@@ -523,6 +525,224 @@ def get_news_categories():
     except:
         return ["politics", "economy", "technology", "sports", "health", "culture", "society", "international"]
 
+# === External-Web RAG 기능 함수들 ===
+def external_web_upload_topic(topic, max_results):
+    """External-Web RAG: 주제 업로드"""
+    if not topic.strip():
+        return "주제를 입력해주세요.", "오류"
+    
+    try:
+        payload = {"topic": topic, "max_results": max_results}
+        result = make_api_call("external-web/upload-topic", payload)
+        
+        if "error" in result:
+            return result["error"], "오류"
+        
+        success_msg = f"✅ **업로드 성공!**\n\n"
+        success_msg += f"**주제:** {result.get('topic', 'N/A')}\n"
+        success_msg += f"**추가된 청크 수:** {result.get('added_chunks', 0)}개\n"
+        success_msg += f"**최대 검색 결과:** {result.get('max_results', 0)}개\n\n"
+        success_msg += f"**메시지:** {result.get('message', '')}"
+        
+        status = f"주제: {topic} | 청크: {result.get('added_chunks', 0)}개"
+        return success_msg, status
+        
+    except Exception as e:
+        error_msg = f"External-Web 업로드 중 오류 발생: {str(e)}"
+        return error_msg, "오류"
+
+def external_web_rag_query(prompt, top_k, model_key):
+    """External-Web RAG: 질의응답"""
+    if not prompt.strip():
+        return "질문을 입력해주세요.", "", "오류"
+    
+    try:
+        payload = {"prompt": prompt, "top_k": top_k}
+        if model_key and model_key != "기본 모델":
+            payload["model_key"] = model_key
+        
+        result = make_api_call("external-web/rag-query", payload)
+        
+        if "error" in result:
+            return result["error"], "", "오류"
+        
+        # 답변 포맷팅
+        response = result.get("response", "응답 없음")
+        
+        # 관련 문서 포맷팅
+        docs = result.get("relevant_documents", [])
+        doc_str = ""
+        if docs:
+            doc_str = f"**📄 참고 문서 ({len(docs)}개):**\n\n"
+            for i, doc in enumerate(docs, 1):
+                doc_str += f"### {i}. {doc.get('title', '제목 없음')}\n"
+                doc_str += f"**출처:** [{doc.get('source', 'N/A')}]({doc.get('source', '#')})\n"
+                content = doc.get('content', '')
+                if content:
+                    doc_str += f"**내용:** {content[:300]}...\n"
+                doc_str += "---\n\n"
+        else:
+            doc_str = "관련 문서를 찾지 못했습니다."
+        
+        # 상태 정보
+        model_info = result.get("model_info", {})
+        status = f"모델: {model_info.get('model_key', 'N/A')} | 문서: {len(docs)}개 | 소스: External-Web"
+        
+        return response, doc_str, status
+        
+    except Exception as e:
+        error_msg = f"External-Web RAG 질의 중 오류 발생: {str(e)}"
+        return error_msg, "", "오류"
+
+# === Internal-DBMS RAG 기능 함수들 ===
+def internal_db_get_tables():
+    """Internal-DB: 테이블 목록 조회"""
+    try:
+        result = make_api_call("internal-db/tables", {}, method="get")
+        
+        if "error" in result:
+            return result["error"], "오류"
+        
+        tables = result.get("tables", [])
+        if not tables:
+            return "사용 가능한 테이블이 없습니다.", "결과 없음"
+        
+        formatted_tables = f"**📋 사용 가능한 테이블 ({len(tables)}개):**\n\n"
+        for i, table in enumerate(tables, 1):
+            formatted_tables += f"{i}. **{table}**\n"
+        
+        status = f"총 {len(tables)}개 테이블"
+        return formatted_tables, status
+        
+    except Exception as e:
+        error_msg = f"테이블 조회 중 오류 발생: {str(e)}"
+        return error_msg, "오류"
+
+def internal_db_ingest(table_name, save_name, simulate, id_col, title_col, text_cols):
+    """Internal-DB: 테이블 인제스트"""
+    if not table_name.strip():
+        return "테이블 이름을 입력해주세요.", "오류"
+    
+    try:
+        payload = {
+            "table": table_name,
+            "save_name": save_name or table_name,
+            "simulate": simulate
+        }
+        
+        # 선택적 컬럼 정보 추가
+        if id_col and id_col.strip():
+            payload["id_col"] = id_col
+        if title_col and title_col.strip():
+            payload["title_col"] = title_col
+        if text_cols and text_cols.strip():
+            payload["text_cols"] = [col.strip() for col in text_cols.split(",")]
+        
+        result = make_api_call("internal-db/ingest", payload)
+        
+        if "error" in result:
+            return result["error"], "오류"
+        
+        success_msg = f"✅ **인제스트 성공!**\n\n"
+        success_msg += f"**테이블:** {result.get('table', 'N/A')}\n"
+        success_msg += f"**저장 경로:** {result.get('save_dir', 'N/A')}\n"
+        success_msg += f"**처리된 행 수:** {result.get('rows', 0)}개\n"
+        success_msg += f"**생성된 청크 수:** {result.get('chunks', 0)}개\n"
+        success_msg += f"**시뮬레이션 모드:** {'예' if result.get('simulate') else '아니오'}\n\n"
+        
+        schema = result.get("schema", {})
+        if schema:
+            success_msg += f"**스키마 정보:**\n"
+            success_msg += f"- ID 컬럼: {schema.get('id_col', 'N/A')}\n"
+            success_msg += f"- 제목 컬럼: {schema.get('title_col', 'N/A')}\n"
+            success_msg += f"- 텍스트 컬럼: {', '.join(schema.get('text_cols', []))}\n"
+        
+        status = f"테이블: {table_name} | 행: {result.get('rows', 0)} | 청크: {result.get('chunks', 0)}"
+        return success_msg, status
+        
+    except Exception as e:
+        error_msg = f"인제스트 중 오류 발생: {str(e)}"
+        return error_msg, "오류"
+
+def internal_db_query(save_name, question, top_k, margin):
+    """Internal-DB: 질의응답"""
+    if not question.strip():
+        return "질문을 입력해주세요.", "", "오류"
+    
+    try:
+        payload = {
+            "save_name": save_name,
+            "question": question,
+            "top_k": top_k,
+            "margin": margin
+        }
+        
+        result = make_api_call("internal-db/query", payload)
+        
+        if "error" in result:
+            return result["error"], "", "오류"
+        
+        # 답변 포맷팅
+        answer = result.get("answer", "응답 없음")
+        
+        # 출처 정보 포맷팅
+        sources = result.get("sources", [])
+        source_str = ""
+        if sources:
+            source_str = f"**🔍 참고 출처 ({len(sources)}개):**\n\n"
+            for source in sources:
+                marker = source.get("marker", "S?")
+                title = source.get("title", "제목 없음")
+                content = source.get("content", "")
+                score = source.get("score", 0)
+                
+                source_str += f"### {marker}. {title}\n"
+                source_str += f"**유사도 점수:** {score:.4f}\n"
+                if content:
+                    source_str += f"**내용:** {content}\n"
+                source_str += "---\n\n"
+        else:
+            source_str = "참고할 출처를 찾지 못했습니다."
+        
+        # 상태 정보
+        status = f"인덱스: {save_name} | 출처: {len(sources)}개 | top_k: {top_k} | margin: {margin}"
+        
+        return answer, source_str, status
+        
+    except Exception as e:
+        error_msg = f"Internal-DB 질의 중 오류 발생: {str(e)}"
+        return error_msg, "", "오류"
+
+def internal_db_get_status():
+    """Internal-DB: 상태 조회"""
+    try:
+        result = make_api_call("internal-db/status", {}, method="get")
+        
+        if "error" in result:
+            return result["error"], "오류"
+        
+        faiss_indices = result.get("faiss_indices", [])
+        cache_keys = result.get("cache_keys", [])
+        
+        status_msg = f"**📊 Internal-DB 상태 정보**\n\n"
+        status_msg += f"**디스크 저장 인덱스:** {len(faiss_indices)}개\n"
+        for i, index in enumerate(faiss_indices, 1):
+            status_msg += f"  {i}. {index}\n"
+        
+        status_msg += f"\n**메모리 캐시 인덱스:** {len(cache_keys)}개\n"
+        for i, key in enumerate(cache_keys, 1):
+            status_msg += f"  {i}. {key}\n"
+        
+        if not faiss_indices and not cache_keys:
+            status_msg += "\n⚠️ 사용 가능한 인덱스가 없습니다. 먼저 인제스트를 수행해주세요."
+        
+        summary = f"디스크: {len(faiss_indices)}개 | 캐시: {len(cache_keys)}개"
+        return status_msg, summary
+        
+    except Exception as e:
+        error_msg = f"상태 조회 중 오류 발생: {str(e)}"
+        return error_msg, "오류"
+
 def update_model_list():
     """UI가 로드될 때 서버에서 모델 목록을 동적으로 가져옵니다."""
     logger.info("UI: 모델 목록을 서버에서 가져오는 중...")
@@ -731,6 +951,140 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
                             trend_categories_output = gr.Markdown(label="카테고리별 트렌드")
                             trend_info = gr.JSON(label="분석 정보")
 
+        # 5. External-Web RAG 탭 (NEW!)
+        with gr.TabItem("🌐 External-Web RAG (NEW!)"):
+            gr.Markdown("### 🆕 외부 웹 검색 기반 RAG 시스템")
+            gr.Markdown("웹에서 정보를 수집하여 질의응답하는 시스템입니다.")
+            
+            with gr.Tabs():
+                # 5-1. 주제 업로드
+                with gr.TabItem("📤 주제 업로드"):
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            ext_upload_topic = gr.Textbox(
+                                label="업로드할 주제", 
+                                placeholder="예: 인공지능 ChatGPT, 삼성전자 반도체"
+                            )
+                            ext_upload_max_results = gr.Slider(
+                                minimum=5, maximum=30, value=20, step=5,
+                                label="최대 검색 결과 수"
+                            )
+                            ext_upload_button = gr.Button("주제 업로드", variant="primary")
+                        
+                        with gr.Column(scale=2):
+                            ext_upload_output = gr.Markdown(label="업로드 결과")
+                            ext_upload_status = gr.Textbox(label="상태 정보", interactive=False)
+
+                # 5-2. 질의응답
+                with gr.TabItem("❓ 질의응답"):
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            ext_query_prompt = gr.Textbox(
+                                lines=3,
+                                label="질문", 
+                                placeholder="업로드한 주제에 대해 질문하세요"
+                            )
+                            ext_query_top_k = gr.Slider(
+                                minimum=1, maximum=10, value=5, step=1,
+                                label="검색할 문서 수 (top_k)"
+                            )
+                            ext_query_model = gr.Dropdown(
+                                label="사용할 모델", 
+                                choices=["기본 모델", "qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"],
+                                value="기본 모델"
+                            )
+                            ext_query_button = gr.Button("질문하기", variant="primary")
+                        
+                        with gr.Column(scale=2):
+                            ext_query_answer = gr.Markdown(label="답변")
+                            ext_query_docs = gr.Markdown(label="참고 문서")
+                            ext_query_status = gr.Textbox(label="상태 정보", interactive=False)
+
+        # 6. Internal-DBMS RAG 탭 (NEW!)
+        with gr.TabItem("🗄️ Internal-DBMS RAG (NEW!)"):
+            gr.Markdown("### 🆕 내부 데이터베이스 기반 RAG 시스템")
+            gr.Markdown("내부 DB 테이블을 벡터화하여 질의응답하는 시스템입니다.")
+            
+            with gr.Tabs():
+                # 6-1. 테이블 관리
+                with gr.TabItem("📋 테이블 관리"):
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            int_tables_button = gr.Button("테이블 목록 조회", variant="secondary")
+                            int_status_button = gr.Button("FAISS 인덱스 상태", variant="secondary")
+                        
+                        with gr.Column(scale=2):
+                            int_tables_output = gr.Markdown(label="테이블 목록")
+                            int_status_output = gr.Markdown(label="상태 정보")
+                            int_tables_status = gr.Textbox(label="조회 상태", interactive=False)
+
+                # 6-2. 테이블 인제스트
+                with gr.TabItem("⚡ 테이블 인제스트"):
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            int_ingest_table = gr.Textbox(
+                                label="테이블 이름", 
+                                placeholder="knowledge",
+                                value="knowledge"
+                            )
+                            int_ingest_save_name = gr.Textbox(
+                                label="저장 이름", 
+                                placeholder="knowledge (비워두면 테이블명 사용)"
+                            )
+                            int_ingest_simulate = gr.Checkbox(
+                                label="시뮬레이션 모드 (SQLite 샘플 데이터 사용)", 
+                                value=True
+                            )
+                            
+                            with gr.Accordion("고급 설정 (선택사항)", open=False):
+                                int_ingest_id_col = gr.Textbox(
+                                    label="ID 컬럼명", 
+                                    placeholder="자동 추론 (예: id)"
+                                )
+                                int_ingest_title_col = gr.Textbox(
+                                    label="제목 컬럼명", 
+                                    placeholder="자동 추론 (예: term, title)"
+                                )
+                                int_ingest_text_cols = gr.Textbox(
+                                    label="텍스트 컬럼명 (쉼표 구분)", 
+                                    placeholder="자동 추론 (예: description,role,details)"
+                                )
+                            
+                            int_ingest_button = gr.Button("인제스트 실행", variant="primary")
+                        
+                        with gr.Column(scale=2):
+                            int_ingest_output = gr.Markdown(label="인제스트 결과")
+                            int_ingest_status = gr.Textbox(label="상태 정보", interactive=False)
+
+                # 6-3. 질의응답
+                with gr.TabItem("❓ 질의응답"):
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            int_query_save_name = gr.Textbox(
+                                label="인덱스 이름", 
+                                placeholder="knowledge",
+                                value="knowledge"
+                            )
+                            int_query_question = gr.Textbox(
+                                lines=3,
+                                label="질문", 
+                                placeholder="예: Self-Attention은 무엇인가? 역할과 함께 설명하라."
+                            )
+                            int_query_top_k = gr.Slider(
+                                minimum=1, maximum=10, value=5, step=1,
+                                label="검색할 문서 수 (top_k)"
+                            )
+                            int_query_margin = gr.Slider(
+                                minimum=0.0, maximum=1.0, value=0.12, step=0.01,
+                                label="마진 필터 (유사도 차이 허용 범위)"
+                            )
+                            int_query_button = gr.Button("질문하기", variant="primary")
+                        
+                        with gr.Column(scale=2):
+                            int_query_answer = gr.Markdown(label="답변")
+                            int_query_sources = gr.Markdown(label="참고 출처")
+                            int_query_status = gr.Textbox(label="상태 정보", interactive=False)
+
     # --- 이벤트 핸들러 ---
     gen_button.click(fn=generate_text, inputs=[gen_prompt, gen_model_select, gen_streaming], outputs=[gen_output, gen_model_info])
     rag_button.click(fn=rag_query, inputs=[rag_question, rag_model_select], outputs=[rag_answer, rag_docs, rag_model_info_output])
@@ -756,6 +1110,41 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
         fn=analyze_news_trends, 
         inputs=[trend_categories, trend_max_results, trend_time_range, trend_model], 
         outputs=[trend_output, trend_categories_output, trend_info]
+    )
+    
+    # External-Web RAG 이벤트 핸들러들
+    ext_upload_button.click(
+        fn=external_web_upload_topic,
+        inputs=[ext_upload_topic, ext_upload_max_results],
+        outputs=[ext_upload_output, ext_upload_status]
+    )
+    ext_query_button.click(
+        fn=external_web_rag_query,
+        inputs=[ext_query_prompt, ext_query_top_k, ext_query_model],
+        outputs=[ext_query_answer, ext_query_docs, ext_query_status]
+    )
+    
+    # Internal-DBMS RAG 이벤트 핸들러들
+    int_tables_button.click(
+        fn=internal_db_get_tables,
+        inputs=[],
+        outputs=[int_tables_output, int_tables_status]
+    )
+    int_status_button.click(
+        fn=internal_db_get_status,
+        inputs=[],
+        outputs=[int_status_output, int_tables_status]
+    )
+    int_ingest_button.click(
+        fn=internal_db_ingest,
+        inputs=[int_ingest_table, int_ingest_save_name, int_ingest_simulate, 
+                int_ingest_id_col, int_ingest_title_col, int_ingest_text_cols],
+        outputs=[int_ingest_output, int_ingest_status]
+    )
+    int_query_button.click(
+        fn=internal_db_query,
+        inputs=[int_query_save_name, int_query_question, int_query_top_k, int_query_margin],
+        outputs=[int_query_answer, int_query_sources, int_query_status]
     )
 
 if __name__ == "__main__":

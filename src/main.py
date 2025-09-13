@@ -2,8 +2,10 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# GPU 설정: 단일 GPU 사용
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+from utils.config_loader import config
+
+# GPU 설정: 설정 파일에서 읽어옴
+os.environ["CUDA_VISIBLE_DEVICES"] = config.get_backend_config('gpu', 'visible_devices')
 
 import gradio as gr
 from fastapi import FastAPI
@@ -26,27 +28,33 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down LLM FastAPI Server...")
 
 
-# Configure logging
+# Configure logging from config
+logging_config = config.get_backend_config('logging')
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=getattr(logging, logging_config['level']),
+    format=logging_config['format']
 )
 logger = logging.getLogger(__name__)
 
+# FastAPI app with config values
+server_config = config.get_backend_config('server')
+ui_server_config = config.ui_server_config
+
 app = FastAPI(
-    title="LLM FastAPI Server",
-    description="FastAPI server for LLM, embedding, and RAG functionality",
-    version="1.0.0",
+    title=ui_server_config['title'],
+    description=ui_server_config['description'],
+    version=ui_server_config['version'],
     lifespan=lifespan
 )
 
-# Add CORS middleware
+# Add CORS middleware from config
+security_config = config.get_backend_config('security')
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=security_config['cors']['allow_origins'],
+    allow_credentials=security_config['cors']['allow_credentials'],
+    allow_methods=security_config['cors']['allow_methods'],
+    allow_headers=security_config['cors']['allow_headers'],
 )
 
 app.include_router(router, prefix="/api/v1")
@@ -135,4 +143,10 @@ app = gr.mount_gradio_app(app, gradio_ui, path="/ui")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
+    # Use config values for server
+    uvicorn.run(
+        "main:app", 
+        host=server_config['host'], 
+        port=server_config['port'], 
+        reload=server_config['reload']
+    )

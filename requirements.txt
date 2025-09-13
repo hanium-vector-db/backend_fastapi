@@ -33,3 +33,9 @@ tavily-python
 
 # 시스템 모니터링
 psutil
+
+# Internal DB 추가 의존성
+aiomysql
+aiosqlite
+sqlalchemy[asyncio]
+pandas

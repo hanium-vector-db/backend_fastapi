@@ -1,6 +1,11 @@
 from pydantic_settings import BaseSettings
 from pydantic import model_validator, ConfigDict
 from typing import List, Optional
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils.config_loader import config
 
 class Settings(BaseSettings):
     model_config = ConfigDict(
@@ -9,21 +14,38 @@ class Settings(BaseSettings):
         extra='ignore'  # .env의 추가 필드 무시
     )
     
-    # 사용자가 선택할 수 있는 모델 목록 (3개로 제한)
-    available_models: List[str] = ["qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"]
+    # 설정 파일에서 읽어온 모델 설정들
+    @property
+    def available_models(self) -> List[str]:
+        return ["qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"]
     
-    # 사용자가 선택한 모델
-    selected_model: str = "qwen2.5-7b"
+    @property
+    def selected_model(self) -> str:
+        return config.default_llm_config['model_key']
     
-    # 선택적 설정들
-    database_url: str = "sqlite:///./database.db"
-    embedding_model: str = "BAAI/bge-m3"
-    api_key: str = "your_api_key"
+    @property
+    def database_url(self) -> str:
+        mariadb_config = config.mariadb_config
+        return f"mysql+aiomysql://{mariadb_config['user']}:{mariadb_config['password']}@{mariadb_config['host']}:{mariadb_config['port']}/{mariadb_config['database']}"
+    
+    @property
+    def embedding_model(self) -> str:
+        return config.embedding_config['model_id']
+    
+    @property
+    def api_key(self) -> str:
+        return "your_api_key"
     
     # .env에서 읽을 수 있는 추가 설정들 (선택적)
     huggingface_token: Optional[str] = None
-    server_host: str = "0.0.0.0"
-    server_port: int = 8001
+    
+    @property
+    def server_host(self) -> str:
+        return config.server_host
+    
+    @property
+    def server_port(self) -> int:
+        return config.server_port
 
     @model_validator(mode='after')
     def validate_model(self) -> 'Settings':

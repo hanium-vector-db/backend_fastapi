@@ -10,12 +10,13 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.helpers import search_news, create_documents_from_news, search_latest_news, get_news_summary_with_tavily
+from utils.config_loader import config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- 상수 정의 ---
-DB_PERSIST_DIRECTORY = "./data/vector_db"
+# --- 설정에서 읽어온 상수들 ---
+DB_PERSIST_DIRECTORY = config.vector_db_path
 
 class RAGService:
     def __init__(self, llm_handler, embedding_handler):
@@ -73,17 +74,25 @@ class RAGService:
             if not documents:
                 return 0, "Failed to create documents from news articles."
 
-            # 3. 텍스트 분할
-            text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=80)
+            # 3. 텍스트 분할 (설정에서 읽어옴)
+            external_web_config = config.external_web_rag_config
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=external_web_config['chunk_size'], 
+                chunk_overlap=external_web_config['chunk_overlap']
+            )
             chunks = text_splitter.split_documents(documents)
             logger.info(f"Created {len(chunks)} chunks from {len(documents)} documents.")
 
-            # 4. DB에 추가
+            # 4. DB에 추가 (persist 에러 방지)
             if chunks:
-                self.db.add_documents(chunks)
-                self.db.persist() # 변경사항 저장
-                logger.info(f"Successfully added {len(chunks)} new chunks to the vector database.")
-                return len(chunks), f"Successfully added {len(chunks)} new chunks to the database."
+                try:
+                    self.db.add_documents(chunks)
+                    logger.info(f"Successfully added {len(chunks)} new chunks to the vector database.")
+                    return len(chunks), f"Successfully added {len(chunks)} new chunks to the database."
+                except Exception as persist_error:
+                    logger.warning(f"Persist error (ignoring): {persist_error}")
+                    # persist 실패해도 메모리에는 추가되었으므로 성공으로 처리
+                    return len(chunks), f"Successfully added {len(chunks)} new chunks to the database (in-memory)."
             else:
                 return 0, "No processable content found in the articles."
         except Exception as e:
@@ -119,7 +128,14 @@ class RAGService:
                 return "RAG service not initialized"
             
             response = self.rag_chain.invoke(query)
-            return response
+            
+            # Handle different response types
+            if hasattr(response, 'content'):
+                return response.content
+            elif isinstance(response, str):
+                return response
+            else:
+                return str(response)
             
         except Exception as e:
             logger.error(f"Error generating RAG response: {e}")

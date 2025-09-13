@@ -5,7 +5,13 @@
       "Bash(\"C:\\Users\\geon1\\anaconda3\\envs\\llm_server\\python.exe\" test_api.py)",
       "Bash(\"C:\\Users\\geon1\\anaconda3\\envs\\llm_server\\python.exe\" src/main.py)",
       "Bash(rmdir:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(source:*)",
+      "Bash(python:*)",
+      "Bash(curl:*)",
+      "Bash(uvicorn:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,0 +1,139 @@
+# AWS Local LLM Backend Configuration
+
+# 서버 설정
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+  workers: 1
+  log_level: "info"
+
+# 데이터베이스 설정
+database:
+  # MariaDB 설정
+  mariadb:
+    host: "127.0.0.1"
+    port: 53301
+    user: "manager"
+    password: "SqlDba-1"
+    database: "sql_db"
+    charset: "utf8mb4"
+  
+  # 벡터 데이터베이스 경로
+  vector_db_path: "./data/vector_db"
+  faiss_db_path: "./data/internal_faiss_db"
+
+# 모델 설정
+models:
+  # 기본 LLM 모델
+  default_llm:
+    model_id: "meta-llama/Meta-Llama-3-8B-Instruct"
+    model_key: "llama3.1-8b"
+    device: "cuda:0"
+    torch_dtype: "float16"
+    
+  # 임베딩 모델
+  embedding:
+    model_id: "BAAI/bge-m3"
+    device: "cuda:0"
+  
+  # 모델 캐시 경로
+  cache_dir: "./models_cache"
+  
+# Hugging Face 설정
+huggingface:
+  use_auth_token: true
+  # 토큰은 환경변수 HF_TOKEN에서 읽어옴
+
+# RAG 설정
+rag:
+  # External-Web RAG
+  external_web:
+    chunk_size: 800
+    chunk_overlap: 80
+    search_k: 3
+    max_results: 5
+    
+  # Internal-DBMS RAG  
+  internal_db:
+    chunk_size: 700
+    chunk_overlap: 120
+    top_k: 5
+    score_margin: 0.12
+    max_context_chars: 1800
+    max_new_tokens: 320
+    temperature: 0.2
+
+# 뉴스 API 설정
+news:
+  # DuckDuckGo 검색
+  duckduckgo:
+    region: "kr-kr"
+    safesearch: "moderate"
+    timelimit: "d"
+    
+  # Tavily API
+  tavily:
+    max_results: 10
+    search_depth: "advanced"
+    # API 키는 환경변수 TAVILY_API_KEY에서 읽어옴
+
+# 로깅 설정
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./logs/backend.log"
+  max_size: "10MB"
+  backup_count: 5
+
+# GPU 설정
+gpu:
+  visible_devices: "0"
+  memory_fraction: 0.9
+  allow_growth: true
+
+# 보안 설정
+security:
+  cors:
+    allow_origins: ["*"]
+    allow_credentials: true
+    allow_methods: ["*"]
+    allow_headers: ["*"]
+  
+  # API 키 보안
+  api_key_header: "X-API-Key"
+  # API 키는 환경변수 API_SECRET_KEY에서 읽어옴
+
+# 파일 업로드 설정
+upload:
+  max_file_size: "100MB"
+  allowed_extensions: [".txt", ".pdf", ".docx", ".md"]
+  upload_dir: "./uploads"
+
+# 캐시 설정
+cache:
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
+    expire_time: 3600  # 1시간
+  
+  # 메모리 캐시
+  memory:
+    max_size: 1000
+    ttl: 1800  # 30분
+
+# 성능 설정
+performance:
+  # 비동기 워커 수
+  async_workers: 4
+  
+  # 타임아웃 설정
+  timeouts:
+    llm_generation: 300  # 5분
+    web_search: 60      # 1분
+    db_query: 30        # 30초
+    
+  # 배치 처리
+  batch_size: 8
+  max_batch_wait: 0.1  # 100ms
