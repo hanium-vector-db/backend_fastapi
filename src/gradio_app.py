@@ -555,20 +555,20 @@ def external_web_rag_query(prompt, top_k, model_key):
     """External-Web RAG: 질의응답"""
     if not prompt.strip():
         return "질문을 입력해주세요.", "", "오류"
-    
+
     try:
         payload = {"prompt": prompt, "top_k": top_k}
         if model_key and model_key != "기본 모델":
             payload["model_key"] = model_key
-        
+
         result = make_api_call("external-web/rag-query", payload)
-        
+
         if "error" in result:
             return result["error"], "", "오류"
-        
+
         # 답변 포맷팅
         response = result.get("response", "응답 없음")
-        
+
         # 관련 문서 포맷팅
         docs = result.get("relevant_documents", [])
         doc_str = ""
@@ -583,16 +583,132 @@ def external_web_rag_query(prompt, top_k, model_key):
                 doc_str += "---\n\n"
         else:
             doc_str = "관련 문서를 찾지 못했습니다."
-        
+
         # 상태 정보
         model_info = result.get("model_info", {})
         status = f"모델: {model_info.get('model_key', 'N/A')} | 문서: {len(docs)}개 | 소스: External-Web"
-        
+
         return response, doc_str, status
-        
+
     except Exception as e:
         error_msg = f"External-Web RAG 질의 중 오류 발생: {str(e)}"
         return error_msg, "", "오류"
+
+def external_web_auto_rag(query, max_results, model_key):
+    """External-Web RAG: 자동 질의응답 (스트리밍으로 실시간 진행 상황 표시)"""
+    if not query.strip():
+        yield "질문을 입력해주세요.", "", "오류"
+        return
+
+    try:
+        payload = {"query": query, "max_results": max_results}
+        if model_key and model_key != "기본 모델":
+            payload["model_key"] = model_key
+
+        # 스트리밍 요청
+        response = requests.post(
+            f"{API_URL}/external-web/auto-rag",
+            json=payload,
+            timeout=300,
+            stream=True,
+            headers={'Accept': 'text/event-stream'}
+        )
+
+        if response.status_code >= 400:
+            error_message = f"API 오류 ({response.status_code}): {response.text}"
+            yield error_message, "", "오류 발생"
+            return
+
+        # 스트리밍 응답 처리
+        final_result = None
+        current_answer = "🔄 처리 시작..."
+        current_docs = ""
+        current_status = "시작 중..."
+
+        for line in response.iter_lines(decode_unicode=True):
+            if line and line.startswith("data: "):
+                try:
+                    data_str = line[6:]  # "data: " 부분 제거
+                    data = json.loads(data_str)
+
+                    status = data.get('status', '')
+                    message = data.get('message', '')
+                    progress = data.get('progress', 0)
+
+                    if status == 'starting':
+                        current_status = f"🚀 {message}"
+                        current_answer = "🔄 자동 RAG 처리를 시작합니다..."
+                        yield current_answer, current_docs, current_status
+
+                    elif status == 'searching':
+                        current_status = f"🔍 {message} (진행률: {progress}%)"
+                        current_answer = "🔍 웹에서 관련 뉴스를 검색하는 중입니다...\n\n잠시만 기다려주세요."
+                        yield current_answer, current_docs, current_status
+
+                    elif status == 'vectorizing':
+                        current_status = f"📚 {message} (진행률: {progress}%)"
+                        current_answer = f"✅ 뉴스 검색 완료!\n\n📚 {message}\n\n다음 단계로 진행 중..."
+                        yield current_answer, current_docs, current_status
+
+                    elif status == 'generating':
+                        current_status = f"🤖 {message} (진행률: {progress}%)"
+                        current_answer = "🤖 AI가 수집된 정보를 바탕으로 종합적인 답변을 생성하고 있습니다...\n\n조금만 더 기다려주세요."
+                        yield current_answer, current_docs, current_status
+
+                    elif status == 'finalizing':
+                        current_status = f"📝 {message} (진행률: {progress}%)"
+                        current_answer = "📝 답변 생성 완료! 관련 문서 정보를 정리하는 중..."
+                        yield current_answer, current_docs, current_status
+
+                    elif status == 'completed':
+                        final_result = data
+                        break
+
+                    elif status == 'no_results':
+                        current_answer = f"⚠️ {message}"
+                        current_status = "검색 결과 없음"
+                        yield current_answer, current_docs, current_status
+                        return
+
+                    elif status == 'error':
+                        error_msg = data.get('message', '알 수 없는 오류')
+                        yield f"❌ 오류: {error_msg}", "", "오류 발생"
+                        return
+
+                except json.JSONDecodeError:
+                    continue
+
+        # 최종 결과 처리
+        if final_result:
+            response_text = final_result.get("response", "응답 없음")
+            docs = final_result.get("relevant_documents", [])
+
+            # 관련 문서 포맷팅
+            doc_str = ""
+            if docs:
+                doc_str = f"**🔍 자동 검색된 관련 문서 ({len(docs)}개):**\n\n"
+                for i, doc in enumerate(docs, 1):
+                    doc_str += f"### {i}. {doc.get('title', '제목 없음')}\n"
+                    doc_str += f"**출처:** [{doc.get('source', 'N/A')}]({doc.get('source', '#')})\n"
+                    content = doc.get('content', '')
+                    if content:
+                        doc_str += f"**내용:** {content[:300]}...\n"
+                    doc_str += "---\n\n"
+            else:
+                doc_str = "관련 문서를 찾지 못했습니다."
+
+            # 상태 정보
+            model_info = final_result.get("model_info", {})
+            added_chunks = final_result.get("added_chunks", 0)
+            final_status = f"✅ 완료! | 모델: {model_info.get('model_key', 'N/A')} | 추가 청크: {added_chunks}개 | 문서: {len(docs)}개"
+
+            yield response_text, doc_str, final_status
+        else:
+            yield "처리가 완료되지 않았습니다.", "", "오류"
+
+    except Exception as e:
+        error_msg = f"External-Web 자동 RAG 중 오류 발생: {str(e)}"
+        yield error_msg, "", "오류"
 
 # === Internal-DBMS RAG 기능 함수들 ===
 def internal_db_get_tables():
@@ -768,10 +884,11 @@ def update_model_list():
     logger.info(f"UI: 최종 모델 선택지: {choices}")
     return (
         gr.Dropdown(choices=choices, value="기본 모델"),
-        gr.Dropdown(choices=choices, value="기본 모델"), 
+        gr.Dropdown(choices=choices, value="기본 모델"),
         gr.Dropdown(choices=choices, value="기본 모델"),
         gr.Dropdown(choices=choices, value="기본 모델"),  # 뉴스 요약용
-        gr.Dropdown(choices=choices, value="기본 모델")   # 뉴스 분석용
+        gr.Dropdown(choices=choices, value="기본 모델"),  # 뉴스 분석용
+        gr.Dropdown(choices=choices, value="기본 모델")   # Auto RAG용
     )
 
 # --- Gradio UI 구성 ---
@@ -955,14 +1072,43 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
         with gr.TabItem("🌐 External-Web RAG (NEW!)"):
             gr.Markdown("### 🆕 외부 웹 검색 기반 RAG 시스템")
             gr.Markdown("웹에서 정보를 수집하여 질의응답하는 시스템입니다.")
-            
+
             with gr.Tabs():
-                # 5-1. 주제 업로드
+                # 5-1. 자동 RAG ⭐ NEW!
+                with gr.TabItem("🚀 Auto RAG (추천!)"):
+                    gr.Markdown("### ⚡ 완전 자동화된 RAG")
+                    gr.Markdown("**질문만 하면 자동으로 관련 뉴스를 검색하고 벡터 DB화하여 답변을 제공합니다.**")
+
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            auto_query = gr.Textbox(
+                                lines=3,
+                                label="질문",
+                                placeholder="예: 삼성전자 AI 반도체 최신 동향은?\n인공지능 투자 현황은 어떻습니까?\nChatGPT 관련 최신 소식을 알려주세요."
+                            )
+                            auto_max_results = gr.Slider(
+                                minimum=5, maximum=25, value=15, step=5,
+                                label="검색할 뉴스 수"
+                            )
+                            auto_model = gr.Dropdown(
+                                label="사용할 모델",
+                                choices=["기본 모델", "qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"],
+                                value="기본 모델"
+                            )
+                            auto_button = gr.Button("🚀 자동 RAG 실행", variant="primary", size="lg")
+
+                        with gr.Column(scale=2):
+                            auto_progress = gr.HTML(label="📊 진행 상황", visible=True)
+                            auto_answer = gr.Markdown(label="🤖 AI 답변")
+                            auto_docs = gr.Markdown(label="📰 자동 검색된 관련 뉴스")
+                            auto_status = gr.Textbox(label="🔄 처리 상태", interactive=False)
+
+                # 5-2. 주제 업로드
                 with gr.TabItem("📤 주제 업로드"):
                     with gr.Row():
                         with gr.Column(scale=1):
                             ext_upload_topic = gr.Textbox(
-                                label="업로드할 주제", 
+                                label="업로드할 주제",
                                 placeholder="예: 인공지능 ChatGPT, 삼성전자 반도체"
                             )
                             ext_upload_max_results = gr.Slider(
@@ -970,18 +1116,18 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
                                 label="최대 검색 결과 수"
                             )
                             ext_upload_button = gr.Button("주제 업로드", variant="primary")
-                        
+
                         with gr.Column(scale=2):
                             ext_upload_output = gr.Markdown(label="업로드 결과")
                             ext_upload_status = gr.Textbox(label="상태 정보", interactive=False)
 
-                # 5-2. 질의응답
+                # 5-3. 질의응답
                 with gr.TabItem("❓ 질의응답"):
                     with gr.Row():
                         with gr.Column(scale=1):
                             ext_query_prompt = gr.Textbox(
                                 lines=3,
-                                label="질문", 
+                                label="질문",
                                 placeholder="업로드한 주제에 대해 질문하세요"
                             )
                             ext_query_top_k = gr.Slider(
@@ -989,12 +1135,12 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
                                 label="검색할 문서 수 (top_k)"
                             )
                             ext_query_model = gr.Dropdown(
-                                label="사용할 모델", 
+                                label="사용할 모델",
                                 choices=["기본 모델", "qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"],
                                 value="기본 모델"
                             )
                             ext_query_button = gr.Button("질문하기", variant="primary")
-                        
+
                         with gr.Column(scale=2):
                             ext_query_answer = gr.Markdown(label="답변")
                             ext_query_docs = gr.Markdown(label="참고 문서")
@@ -1113,6 +1259,11 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
     )
     
     # External-Web RAG 이벤트 핸들러들
+    auto_button.click(
+        fn=external_web_auto_rag,
+        inputs=[auto_query, auto_max_results, auto_model],
+        outputs=[auto_answer, auto_docs, auto_status]
+    )
     ext_upload_button.click(
         fn=external_web_upload_topic,
         inputs=[ext_upload_topic, ext_upload_max_results],

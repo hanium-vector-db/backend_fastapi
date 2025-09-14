@@ -54,21 +54,22 @@ def search_news(query: str, max_results: int = 5, category: str = None, time_ran
         'international': '국제 해외'
     }
     
-    # 카테고리가 지정된 경우 검색어에 추가
-    search_query = query
+    # 카테고리가 지정된 경우 검색어에 추가하고 한국어 키워드 강화
+    search_query = f"{query} 뉴스 한국"
     if category and category in category_keywords:
-        search_query = f"{query} {category_keywords[category]}"
+        search_query = f"{query} {category_keywords[category]} 뉴스 한국"
     
     logger.info(f"Tavily로 '{search_query}' 뉴스 검색 중...")
     
     try:
-        # Tavily로 뉴스 검색
+        # Tavily로 뉴스 검색 (한국어 뉴스 사이트 우선)
         response = tavily_client.search(
             query=search_query,
             search_depth="advanced",
             max_results=max_results,
-            include_domains=["news.google.com", "naver.com", "daum.net", "yna.co.kr", "chosun.com"],
-            topic="news"
+            include_domains=["naver.com", "daum.net", "yna.co.kr", "news.chosun.com", "news.joins.com", "news.donga.com", "hani.co.kr", "khan.co.kr", "mt.co.kr"],
+            topic="news",
+            include_raw_content=True
         )
         
         results = []
@@ -229,14 +230,15 @@ def get_news_summary_with_tavily(query: str, max_results: int = 5):
     logger.info(f"Tavily로 뉴스 요약용 데이터 수집 중: '{query}'")
     
     try:
-        # Tavily의 search 및 answer 기능 활용
+        # Tavily의 search 및 answer 기능 활용 (한국어 뉴스 우선)
         response = tavily_client.search(
-            query=f"{query} 최신 뉴스",
-            search_depth="advanced", 
+            query=f"{query} 최신 뉴스 한국",
+            search_depth="advanced",
             max_results=max_results,
             topic="news",
             include_answer=True,
-            include_raw_content=False
+            include_raw_content=True,
+            include_domains=["naver.com", "daum.net", "yna.co.kr", "news.chosun.com", "news.joins.com", "news.donga.com", "hani.co.kr", "khan.co.kr", "mt.co.kr"]
         )
         
         results = []

@@ -84,6 +84,11 @@ class ExternalWebQueryRequest(BaseModel):
     top_k: int = 5
     model_key: str = None
 
+class ExternalWebAutoRAGRequest(BaseModel):
+    query: str
+    max_results: int = 10
+    model_key: str = None
+
 # Internal-DBMS RAG 요청 모델들
 class InternalDBIngestRequest(BaseModel):
     table: str = "knowledge"
@@ -1072,15 +1077,91 @@ async def external_web_upload_topic(request: ExternalWebUploadRequest):
         logger.error(f"External-Web 업로드 오류: {e}")
         raise HTTPException(status_code=500, detail=f"External-Web 업로드 실패: {str(e)}")
 
+@router.post("/external-web/auto-rag")
+async def external_web_auto_rag(request: ExternalWebAutoRAGRequest):
+    """질의에 대해 자동으로 웹 검색하고 벡터 DB화 한 후 RAG 응답을 생성합니다 (스트리밍)"""
+
+    async def generate_auto_rag_stream():
+        try:
+            service = get_rag_service(request.model_key)
+            logger.info(f"자동 External-Web RAG 요청: '{request.query}'")
+
+            # 시작 신호
+            start_msg = f"'{request.query}' 관련 자동 RAG 처리를 시작합니다..."
+            yield f"data: {json.dumps({'status': 'starting', 'message': start_msg}, ensure_ascii=False)}\n\n"
+
+            # 1단계: 웹 검색 시작
+            yield f"data: {json.dumps({'status': 'searching', 'message': '웹에서 관련 뉴스를 검색하는 중...', 'progress': 20}, ensure_ascii=False)}\n\n"
+
+            # 웹 검색 및 벡터 DB 추가
+            added_chunks, upload_message = service.add_documents_from_web(request.query, request.max_results)
+
+            if added_chunks == 0:
+                no_results_msg = f"'{request.query}'에 대한 최신 뉴스를 찾을 수 없어 답변을 생성할 수 없습니다."
+                yield f"data: {json.dumps({'status': 'no_results', 'message': no_results_msg}, ensure_ascii=False)}\n\n"
+                return
+
+            # 2단계: 벡터 DB 처리 완료
+            vectorize_msg = f"{added_chunks}개의 뉴스 기사를 벡터 DB에 저장 완료"
+            yield f"data: {json.dumps({'status': 'vectorizing', 'message': vectorize_msg, 'progress': 50}, ensure_ascii=False)}\n\n"
+
+            # 3단계: RAG 응답 생성 시작
+            yield f"data: {json.dumps({'status': 'generating', 'message': 'AI가 종합적인 답변을 생성하는 중...', 'progress': 70}, ensure_ascii=False)}\n\n"
+
+            # RAG 응답 생성
+            response = service.generate_response(request.query)
+
+            # 4단계: 관련 문서 정보 가져오기
+            yield f"data: {json.dumps({'status': 'finalizing', 'message': '관련 문서 정보를 정리하는 중...', 'progress': 90}, ensure_ascii=False)}\n\n"
+
+            relevant_docs = service.get_relevant_documents(request.query, k=8)
+
+            # 완료 신호
+            final_result = {
+                "status": "completed",
+                "response": response,
+                "query": request.query,
+                "added_chunks": added_chunks,
+                "relevant_documents": relevant_docs,
+                "search_query": request.query,
+                "upload_message": upload_message,
+                "source": "external-web-auto",
+                "progress": 100,
+                "model_info": {
+                    "model_key": service.llm_handler.model_key,
+                    "model_id": service.llm_handler.SUPPORTED_MODELS[service.llm_handler.model_key]["model_id"],
+                    "description": service.llm_handler.SUPPORTED_MODELS[service.llm_handler.model_key]["description"],
+                    "category": service.llm_handler.SUPPORTED_MODELS[service.llm_handler.model_key]["category"],
+                    "loaded": service.llm_handler.model is not None
+                }
+            }
+
+            yield f"data: {json.dumps(final_result, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error(f"자동 External-Web RAG 오류: {e}")
+            error_msg = f'자동 RAG 처리 실패: {str(e)}'
+            yield f"data: {json.dumps({'status': 'error', 'message': error_msg}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        generate_auto_rag_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
 @router.post("/external-web/rag-query")
 async def external_web_rag_query(request: ExternalWebQueryRequest):
     """외부 웹 정보를 기반으로 한 RAG 질의응답"""
     try:
         service = get_rag_service(request.model_key)
-        
+
         # 벡터 DB에서 관련 문서 검색
         relevant_docs = service.get_relevant_documents(request.prompt, request.top_k)
-        
+
         if not relevant_docs:
             return {
                 "response": "외부 웹 검색 기반 지식베이스에서 충분한 결과를 찾지 못했습니다. 먼저 관련 주제를 업로드해주세요.",
@@ -1088,10 +1169,10 @@ async def external_web_rag_query(request: ExternalWebQueryRequest):
                 "relevant_documents": [],
                 "source": "external-web"
             }
-        
+
         # RAG 응답 생성
         response = service.generate_response(request.prompt)
-        
+
         return {
             "response": response,
             "prompt": request.prompt,
@@ -1105,7 +1186,7 @@ async def external_web_rag_query(request: ExternalWebQueryRequest):
                 "loaded": service.llm_handler.model is not None
             }
         }
-        
+
     except Exception as e:
         logger.error(f"External-Web RAG 질의 오류: {e}")
         raise HTTPException(status_code=500, detail=f"External-Web RAG 질의 실패: {str(e)}")

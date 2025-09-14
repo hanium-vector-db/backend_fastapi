@@ -46,8 +46,8 @@ class RAGService:
             logger.info(f"Vector database loaded/initialized from: {DB_PERSIST_DIRECTORY}")
             logger.info(f"Current document count: {self.db._collection.count()}")
 
-            # Create retriever
-            self.retriever = self.db.as_retriever(search_kwargs={'k': 3})
+            # Create retriever - 더 많은 관련 문서 검색
+            self.retriever = self.db.as_retriever(search_kwargs={'k': 8})
 
             # Setup RAG chain
             self._setup_rag_chain()
@@ -101,55 +101,195 @@ class RAGService:
 
     def _setup_rag_chain(self):
         try:
-            # RAG prompt
-            rag_prompt = ChatPromptTemplate.from_messages([
-                ('system', '다음 Context를 사용하여 Question에 답변해주세요. 만약 Context에 정보가 없다면, 아는대로 답변해주세요. 항상 한국어로 답변해주세요.'),
-                ('user', 'Context: {context}\n---\nQuestion: {question}')
-            ])
+            # RAG 체인을 수동으로 구성하여 ChatPromptValue 문제 해결
+            logger.info("Setting up simplified RAG chain...")
 
-            # Create the RAG chain
-            self.rag_chain = (
-                {"context": self.retriever | self.format_docs, "question": RunnablePassthrough()}
-                | rag_prompt
-                | self.llm_handler.chat_model
-                | StrOutputParser()
-            )
-            
+            # RAG chain은 None으로 설정하고, generate_response에서 수동으로 처리
+            self.rag_chain = None
+
+            # 개선된 보고서 템플릿 정의
+            self.report_template = '''당신은 한국의 전문 뉴스 분석가입니다. 반드시 한국어로만 응답하세요.
+
+📋 분석 지침:
+- 제공된 뉴스 기사들을 종합하여 체계적인 보고서 작성
+- 서로 다른 관점과 정보를 균형있게 제시
+- 중복 내용 최소화, 다양한 시각 포함
+- 전체 응답을 한국어로만 작성
+
+📰 뉴스 기사 자료:
+{context}
+
+📋 질문: {question}
+
+다음 구조로 보고서를 작성하세요:
+
+## 📊 핵심 요약
+(질문의 핵심 답변을 2-3문장으로 간결하게)
+
+## 🔍 상세 분석
+(수집된 기사들의 주요 내용을 분석. 서로 다른 관점 포함)
+
+## 📈 현황 및 동향
+• 현재 상황: (최신 현황)
+• 주요 변화: (최근 변화 사항)
+• 향후 전망: (미래 예측)
+
+## 🎯 핵심 포인트
+• (가장 중요한 사실 3-5개)
+
+## 📚 참고자료
+(분석에 사용된 주요 기사 제목과 출처)'''
+
+            logger.info("RAG chain setup completed successfully")
+
         except Exception as e:
             logger.error(f"Error setting up RAG chain: {e}")
             raise
 
     def format_docs(self, docs):
-        return "\n---\n".join(f"출처: {doc.metadata.get('source', 'Unknown')}\n제목: {doc.metadata.get('title', 'Unknown')}\n내용: {doc.page_content}" for doc in docs)
+        """검색된 문서들을 보고서 작성에 적합한 형태로 포맷팅 (최적화됨)"""
+        formatted_docs = []
+        for i, doc in enumerate(docs, 1):
+            # 내용 길이를 500자로 제한하여 프롬프트 길이 최적화
+            content = doc.page_content.strip()
+            if len(content) > 500:
+                content = content[:500] + "..."
+
+            formatted_doc = f"""[기사{i}] {doc.metadata.get('title', 'Unknown')}
+출처: {doc.metadata.get('source', 'Unknown')[:50]}...
+내용: {content}"""
+
+            formatted_docs.append(formatted_doc)
+
+        return "\n\n".join(formatted_docs)
 
     def generate_response(self, query: str) -> str:
         try:
-            if self.rag_chain is None:
+            if self.retriever is None:
+                logger.error("RAG retriever not initialized")
                 return "RAG service not initialized"
-            
-            response = self.rag_chain.invoke(query)
-            
-            # Handle different response types
-            if hasattr(response, 'content'):
-                return response.content
-            elif isinstance(response, str):
-                return response
-            else:
-                return str(response)
-            
+
+            logger.info(f"Generating RAG response for query: {query}")
+
+            # 1. 관련 문서 검색
+            docs = self.retriever.invoke(query)
+            if not docs:
+                logger.warning("No relevant documents found")
+                return "관련 문서를 찾을 수 없습니다. 먼저 관련 주제를 업로드해주세요."
+
+            logger.info(f"Found {len(docs)} relevant documents")
+
+            # 2. 문서들을 컨텍스트로 포맷팅
+            context = self.format_docs(docs)
+
+            # 3. 최종 프롬프트 구성
+            final_prompt = self.report_template.format(context=context, question=query)
+
+            logger.info("Generating response with LLM...")
+            logger.info(f"Prompt length: {len(final_prompt)} characters")
+
+            # 4. LLM으로 직접 생성 (성능 최적화된 파라미터)
+            response = self.llm_handler.generate(
+                final_prompt,
+                max_length=1024,  # 길이 단축으로 속도 향상
+                temperature=0.3,  # 일관성 있는 한국어 응답
+                stream=False
+            )
+
+            logger.info("Successfully generated RAG response")
+            logger.info(f"Response length: {len(response)} characters")
+
+            return response
+
         except Exception as e:
             logger.error(f"Error generating RAG response: {e}")
-            return f"Error: {str(e)}"
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return f"Error: 답변 생성 중 오류가 발생했습니다. ({str(e)})"
 
-    def get_relevant_documents(self, query: str, k: int = 3):
+    def auto_search_and_respond(self, query: str, max_results: int = 10) -> dict:
+        """
+        질의에 대해 자동으로 웹 검색하여 관련 기사를 찾고 벡터 DB화 한 후 응답을 생성합니다.
+
+        Args:
+            query: 사용자의 질의
+            max_results: 검색할 최대 기사 수
+
+        Returns:
+            dict: 응답, 검색된 문서 수, 관련 문서 정보 등을 포함
+        """
+        try:
+            logger.info(f"자동 웹 검색 기반 RAG 응답 생성 시작: '{query}'")
+
+            # 1. 질의를 기반으로 웹에서 관련 뉴스 검색 및 벡터 DB 추가
+            logger.info(f"'{query}' 관련 뉴스를 웹에서 자동 검색 중...")
+            added_chunks, upload_message = self.add_documents_from_web(query, max_results)
+
+            if added_chunks == 0:
+                logger.warning(f"'{query}'에 대한 웹 검색 결과가 없습니다.")
+                return {
+                    "response": f"'{query}'에 대한 최신 뉴스를 찾을 수 없어 답변을 생성할 수 없습니다. 다른 키워드로 다시 시도해주세요.",
+                    "added_chunks": 0,
+                    "relevant_documents": [],
+                    "search_query": query,
+                    "status": "no_results_found"
+                }
+
+            logger.info(f"웹 검색 완료. {added_chunks}개의 새로운 청크가 벡터 DB에 추가됨")
+
+            # 2. 새로 추가된 정보를 포함하여 RAG 응답 생성
+            logger.info("업데이트된 벡터 DB를 기반으로 RAG 응답 생성 중...")
+            response = self.generate_response(query)
+
+            # 3. 관련 문서 정보 가져오기
+            relevant_docs = self.get_relevant_documents(query, k=8)
+
+            logger.info("자동 웹 검색 기반 RAG 응답 생성 완료")
+
+            return {
+                "response": response,
+                "added_chunks": added_chunks,
+                "relevant_documents": relevant_docs,
+                "search_query": query,
+                "upload_message": upload_message,
+                "status": "success"
+            }
+
+        except Exception as e:
+            logger.error(f"자동 웹 검색 RAG 오류: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return {
+                "response": f"자동 웹 검색 중 오류가 발생했습니다: {str(e)}",
+                "added_chunks": 0,
+                "relevant_documents": [],
+                "search_query": query,
+                "status": "error"
+            }
+
+    def get_relevant_documents(self, query: str, k: int = 8):
         try:
             if self.retriever is None:
                 return []
-            
-            docs = self.retriever.invoke(query)
-            return [{"title": doc.metadata.get('title', 'Unknown'), "content": doc.page_content, "source": doc.metadata.get('source', 'Unknown')}
- for doc in docs]
-            
+
+            # 사용자 지정 k 값으로 검색
+            custom_retriever = self.db.as_retriever(search_kwargs={'k': k})
+            docs = custom_retriever.invoke(query)
+
+            # 문서 정보를 더 자세히 반환
+            formatted_docs = []
+            for doc in docs:
+                formatted_docs.append({
+                    "title": doc.metadata.get('title', 'Unknown'),
+                    "content": doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content,
+                    "source": doc.metadata.get('source', 'Unknown'),
+                    "category": doc.metadata.get('category', 'Unknown'),
+                    "date": doc.metadata.get('date', 'Unknown'),
+                    "score": doc.metadata.get('score', 0)
+                })
+
+            return formatted_docs
+
         except Exception as e:
             logger.error(f"Error retrieving documents: {e}")
             return []

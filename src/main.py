@@ -100,10 +100,21 @@ def read_root():
             },
             "뉴스 기능": {
                 "latest_news": "/api/v1/news/latest",
-                "search_news": "/api/v1/news/search", 
+                "search_news": "/api/v1/news/search",
                 "news_summary": "/api/v1/news/summary",
                 "news_analysis": "/api/v1/news/analysis",
                 "news_categories": "/api/v1/news/categories"
+            },
+            "External-Web RAG": {
+                "auto_rag": "/api/v1/external-web/auto-rag",
+                "upload_topic": "/api/v1/external-web/upload-topic",
+                "rag_query": "/api/v1/external-web/rag-query"
+            },
+            "Internal-DB RAG": {
+                "db_tables": "/api/v1/internal-db/tables",
+                "ingest_table": "/api/v1/internal-db/ingest",
+                "db_query": "/api/v1/internal-db/query",
+                "db_status": "/api/v1/internal-db/status"
             },
             "문서": {
                 "docs": "/docs",

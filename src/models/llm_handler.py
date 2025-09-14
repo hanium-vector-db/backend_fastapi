@@ -135,14 +135,14 @@ class LLMHandler:
             logger.error(f"모델 로딩 실패: {e}")
             raise
 
-    def generate(self, prompt: str, max_length: int = 512, stream: bool = False):
+    def generate(self, prompt: str, max_length: int = 512, stream: bool = False, temperature: float = 0.7):
         """텍스트 생성 (스트리밍 지원)"""
         if stream:
-            return self._generate_stream(prompt, max_length)
+            return self._generate_stream(prompt, max_length, temperature)
         else:
-            return self._generate_normal(prompt, max_length)
+            return self._generate_normal(prompt, max_length, temperature)
     
-    def _generate_normal(self, prompt: str, max_length: int) -> str:
+    def _generate_normal(self, prompt: str, max_length: int, temperature: float = 0.7) -> str:
         """일반 텍스트 생성"""
         try:
             # 모델별 프롬프트 포맷팅
@@ -160,7 +160,7 @@ class LLMHandler:
                     inputs.input_ids,
                     attention_mask=inputs.attention_mask,
                     max_new_tokens=max_length,
-                    temperature=0.7,
+                    temperature=temperature,
                     do_sample=True,
                     pad_token_id=self.tokenizer.pad_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
@@ -177,7 +177,7 @@ class LLMHandler:
             logger.error(f"텍스트 생성 오류: {e}")
             return f"오류 발생: {str(e)}"
     
-    def _generate_stream(self, prompt: str, max_length: int) -> Iterator[str]:
+    def _generate_stream(self, prompt: str, max_length: int, temperature: float = 0.7) -> Iterator[str]:
         """스트리밍 텍스트 생성"""
         try:
             # 모델별 프롬프트 포맷팅
@@ -202,7 +202,7 @@ class LLMHandler:
                 'inputs': inputs.input_ids,
                 'attention_mask': inputs.attention_mask,
                 'max_new_tokens': max_length,
-                'temperature': 0.7,
+                'temperature': temperature,
                 'do_sample': True,
                 'pad_token_id': self.tokenizer.pad_token_id,
                 'eos_token_id': self.tokenizer.eos_token_id,
