@@ -12,7 +12,9 @@
       "Bash(uvicorn:*)",
       "Bash(lsof:*)",
       "Bash(xargs kill:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(tree:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []

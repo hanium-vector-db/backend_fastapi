@@ -594,10 +594,26 @@ def external_web_rag_query(prompt, top_k, model_key):
         error_msg = f"External-Web RAG 질의 중 오류 발생: {str(e)}"
         return error_msg, "", "오류"
 
+def create_progress_html(progress, message, status):
+    """진행률을 시각적으로 표시하는 HTML 생성"""
+    color = "green" if progress == 100 else "blue" if progress > 50 else "orange"
+    return f"""
+    <div style="margin: 10px 0;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+            <span style="font-weight: bold;">{status}</span>
+            <span>{progress}%</span>
+        </div>
+        <div style="background-color: #f0f0f0; border-radius: 10px; padding: 2px;">
+            <div style="background-color: {color}; height: 20px; border-radius: 8px; width: {progress}%; transition: width 0.5s ease;"></div>
+        </div>
+        <div style="margin-top: 8px; color: #666; font-size: 14px;">{message}</div>
+    </div>
+    """
+
 def external_web_auto_rag(query, max_results, model_key):
     """External-Web RAG: 자동 질의응답 (스트리밍으로 실시간 진행 상황 표시)"""
     if not query.strip():
-        yield "질문을 입력해주세요.", "", "오류"
+        yield "", "질문을 입력해주세요.", "", "오류"
         return
 
     try:
@@ -616,12 +632,12 @@ def external_web_auto_rag(query, max_results, model_key):
 
         if response.status_code >= 400:
             error_message = f"API 오류 ({response.status_code}): {response.text}"
-            yield error_message, "", "오류 발생"
+            yield "", error_message, "", "오류 발생"
             return
 
         # 스트리밍 응답 처리
         final_result = None
-        current_answer = "🔄 처리 시작..."
+        current_answer = ""
         current_docs = ""
         current_status = "시작 중..."
 
@@ -636,43 +652,50 @@ def external_web_auto_rag(query, max_results, model_key):
                     progress = data.get('progress', 0)
 
                     if status == 'starting':
-                        current_status = f"🚀 {message}"
+                        progress_html = create_progress_html(5, message, "🚀 시작")
                         current_answer = "🔄 자동 RAG 처리를 시작합니다..."
-                        yield current_answer, current_docs, current_status
+                        current_status = f"🚀 {message}"
+                        yield progress_html, current_answer, current_docs, current_status
 
                     elif status == 'searching':
-                        current_status = f"🔍 {message} (진행률: {progress}%)"
+                        progress_html = create_progress_html(progress, message, "🔍 뉴스 검색")
                         current_answer = "🔍 웹에서 관련 뉴스를 검색하는 중입니다...\n\n잠시만 기다려주세요."
-                        yield current_answer, current_docs, current_status
+                        current_status = f"🔍 {message}"
+                        yield progress_html, current_answer, current_docs, current_status
 
                     elif status == 'vectorizing':
-                        current_status = f"📚 {message} (진행률: {progress}%)"
+                        progress_html = create_progress_html(progress, message, "📚 벡터 DB 저장")
                         current_answer = f"✅ 뉴스 검색 완료!\n\n📚 {message}\n\n다음 단계로 진행 중..."
-                        yield current_answer, current_docs, current_status
+                        current_status = f"📚 {message}"
+                        yield progress_html, current_answer, current_docs, current_status
 
                     elif status == 'generating':
-                        current_status = f"🤖 {message} (진행률: {progress}%)"
+                        progress_html = create_progress_html(progress, message, "🤖 답변 생성")
                         current_answer = "🤖 AI가 수집된 정보를 바탕으로 종합적인 답변을 생성하고 있습니다...\n\n조금만 더 기다려주세요."
-                        yield current_answer, current_docs, current_status
+                        current_status = f"🤖 {message}"
+                        yield progress_html, current_answer, current_docs, current_status
 
                     elif status == 'finalizing':
-                        current_status = f"📝 {message} (진행률: {progress}%)"
+                        progress_html = create_progress_html(progress, message, "📝 마무리")
                         current_answer = "📝 답변 생성 완료! 관련 문서 정보를 정리하는 중..."
-                        yield current_answer, current_docs, current_status
+                        current_status = f"📝 {message}"
+                        yield progress_html, current_answer, current_docs, current_status
 
                     elif status == 'completed':
                         final_result = data
                         break
 
                     elif status == 'no_results':
+                        progress_html = create_progress_html(0, message, "⚠️ 검색 결과 없음")
                         current_answer = f"⚠️ {message}"
                         current_status = "검색 결과 없음"
-                        yield current_answer, current_docs, current_status
+                        yield progress_html, current_answer, current_docs, current_status
                         return
 
                     elif status == 'error':
                         error_msg = data.get('message', '알 수 없는 오류')
-                        yield f"❌ 오류: {error_msg}", "", "오류 발생"
+                        progress_html = create_progress_html(0, error_msg, "❌ 오류 발생")
+                        yield progress_html, f"❌ 오류: {error_msg}", "", "오류 발생"
                         return
 
                 except json.JSONDecodeError:
@@ -697,18 +720,21 @@ def external_web_auto_rag(query, max_results, model_key):
             else:
                 doc_str = "관련 문서를 찾지 못했습니다."
 
-            # 상태 정보
+            # 최종 완료 상태
             model_info = final_result.get("model_info", {})
             added_chunks = final_result.get("added_chunks", 0)
             final_status = f"✅ 완료! | 모델: {model_info.get('model_key', 'N/A')} | 추가 청크: {added_chunks}개 | 문서: {len(docs)}개"
 
-            yield response_text, doc_str, final_status
+            progress_html = create_progress_html(100, "처리 완료!", "✅ 완료")
+            yield progress_html, response_text, doc_str, final_status
         else:
-            yield "처리가 완료되지 않았습니다.", "", "오류"
+            progress_html = create_progress_html(0, "처리가 완료되지 않았습니다.", "❌ 오류")
+            yield progress_html, "처리가 완료되지 않았습니다.", "", "오류"
 
     except Exception as e:
         error_msg = f"External-Web 자동 RAG 중 오류 발생: {str(e)}"
-        yield error_msg, "", "오류"
+        progress_html = create_progress_html(0, error_msg, "❌ 오류")
+        yield progress_html, error_msg, "", "오류"
 
 # === Internal-DBMS RAG 기능 함수들 ===
 def internal_db_get_tables():
@@ -1262,7 +1288,7 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
     auto_button.click(
         fn=external_web_auto_rag,
         inputs=[auto_query, auto_max_results, auto_model],
-        outputs=[auto_answer, auto_docs, auto_status]
+        outputs=[auto_progress, auto_answer, auto_docs, auto_status]
     )
     ext_upload_button.click(
         fn=external_web_upload_topic,

@@ -2,15 +2,28 @@
 
 Retrieval-Augmented Generation (RAG) 기능과 실시간 스트리밍을 갖춘 대형 언어 모델(LLM) 배포를 위한 프로덕션 준비 완료 FastAPI 서버입니다. 3개의 고성능 모델과 다양한 AI 기능을 제공합니다.
 
-## 주요 기능
+## 🚀 주요 기능
 
-- **실시간 스트리밍**: Server-Sent Events를 통한 토큰별 실시간 텍스트 생성
+### 🤖 LLM 모델
 - **3개 고성능 LLM 모델**: 4bit 양자화를 통한 메모리 최적화
-- **이중 UI 지원**: Gradio UI + 전용 스트리밍 웹 페이지
-- **RAG (검색 증강 생성)**: 지능적인 문서 검색 및 컨텍스트 인식 응답
-- **Tavily 뉴스 기능**: 실시간 뉴스 검색, AI 요약, 트렌드 분석
-- **임베딩 생성**: BGE-M3 모델을 사용한 텍스트 임베딩 생성
+- **실시간 스트리밍**: Server-Sent Events를 통한 토큰별 실시간 텍스트 생성
 - **채팅 인터페이스**: 대화 컨텍스트를 유지하는 대화형 채팅 기능
+
+### 🌐 Auto RAG 시스템 (NEW!)
+- **자동 웹 검색 RAG**: 질문만 하면 자동으로 관련 뉴스 검색 → 벡터 DB화 → 답변 생성
+- **실시간 진행 상황**: 시각적 진행률 바와 단계별 상태 표시
+- **3가지 RAG 모드**:
+  - 🚀 **Auto RAG**: 완전 자동화 (추천)
+  - 📤 **주제 업로드**: 수동 주제 설정
+  - 🗄️ **Internal-DB RAG**: 내부 데이터베이스 기반
+
+### 📰 뉴스 기능
+- **Tavily 뉴스 검색**: 실시간 뉴스 검색, AI 요약, 트렌드 분석
+- **AI 뉴스 요약**: 다양한 요약 타입 지원 (간단/포괄적/심층분석)
+- **뉴스 트렌드 분석**: 카테고리별 트렌드 분석
+
+### 🎨 사용자 인터페이스
+- **이중 UI 지원**: Gradio UI + 전용 스트리밍 웹 페이지
 - **RESTful API**: 자동 OpenAPI 문서화가 포함된 잘 문서화된 API 엔드포인트
 - **Docker 지원**: 쉬운 확장을 위한 컨테이너화된 배포
 
@@ -29,39 +42,99 @@ Retrieval-Augmented Generation (RAG) 기능과 실시간 스트리밍을 갖춘 
 - **Python**: 3.11.x (필수)
 - **CUDA**: 12.1 이상
 
-## 프로젝트 구조
+## 📂 프로젝트 구조
 
 ```
-llm-fastapi-server/
-├── src/
-│   ├── main.py                    # FastAPI 애플리케이션 진입점 (스트리밍 지원)
-│   ├── gradio_app.py              # Gradio UI 인터페이스
+AWS_LOCAL_LLM/
+├── src/                           # 📦 메인 소스 코드
+│   ├── main.py                    # 🚀 FastAPI 서버 진입점 (Auto RAG 포함)
+│   ├── gradio_app.py              # 🎨 Gradio UI (진행률 표시 포함)
 │   ├── api/
-│   │   └── routes.py              # API 엔드포인트 정의 (스트리밍 API 포함)
+│   │   └── routes.py              # 🔌 API 엔드포인트 (스트리밍 Auto RAG)
 │   ├── models/
-│   │   ├── llm_handler.py         # LLM 모델 관리 (스트리밍 기능)
-│   │   └── embedding_handler.py   # 임베딩 모델 관리
+│   │   ├── llm_handler.py         # 🤖 LLM 모델 관리
+│   │   └── embedding_handler.py   # 🔤 임베딩 모델 관리
 │   ├── services/
-│   │   └── rag_service.py         # RAG 기능
+│   │   ├── rag_service.py         # 🌐 RAG 서비스 (Auto RAG 로직)
+│   │   ├── internal_db_service.py # 🗄️ Internal-DB RAG
+│   │   └── retrieval_service.py   # 🔍 문서 검색 서비스
 │   ├── core/
-│   │   ├── config.py              # 설정 관리
-│   │   └── logger.py              # 로깅 설정
+│   │   ├── config.py              # ⚙️ 설정 관리
+│   │   └── logger.py              # 📝 로깅 설정
 │   └── utils/
-│       └── helpers.py             # 유틸리티 함수
-├── static/
-│   └── streaming.html             # 전용 실시간 스트리밍 페이지
-├── data/
-│   └── vector_db/                 # 벡터 데이터베이스 저장소
-├── test_qwen.py                           # 단독 모델 테스트
-├── test_api.py                            # API 기능 테스트
-├── test_streaming.py                      # 스트리밍 기능 테스트
-├── requirements.txt                       # Python 의존성
-├── environment_python311_llm_server.yml   # Conda 환경 파일 (Python 3.11)
-├── Dockerfile                             # Docker 설정
-├── docker-compose.yml                     # Docker Compose 설정
-├── API.md                                 # API 명세서
-└── README.md                              # 프로젝트 문서
+│       ├── config_loader.py       # 📋 설정 로더
+│       └── helpers.py             # 🔧 유틸리티 함수
+├── tests/                         # 🧪 테스트 파일들
+│   ├── test_auto_rag.py           # Auto RAG 테스트
+│   ├── test_external_web_rag.py   # External-Web RAG 테스트
+│   ├── test_news_search.py        # 뉴스 검색 테스트
+│   └── debug_vector_db.py         # 벡터 DB 디버깅
+├── config/                        # ⚙️ 설정 파일들
+├── data/                          # 💾 데이터 저장소
+├── static/                        # 🎨 정적 파일들
+└── debug_py/                      # 🔍 디버깅 도구들
+
+## 🚀 빠른 시작
+
+### 1. 환경 설정
+```bash
+# 프로젝트 클론
+git clone <repository-url>
+cd AWS_LOCAL_LLM
+
+# Python 가상환경 생성 및 활성화
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# 또는
+venv\Scripts\activate     # Windows
+
+# 의존성 설치
+pip install -r requirements.txt
 ```
+
+### 2. 환경 변수 설정
+```bash
+# .env 파일 생성
+cp .env.example .env
+
+# 필요한 API 키 설정
+# - TAVILY_API_KEY: 뉴스 검색용
+# - HF_TOKEN: Hugging Face 토큰 (선택)
+```
+
+### 3. 서버 실행
+```bash
+# FastAPI 서버 시작
+python src/main.py
+```
+
+### 4. 접속
+- **메인 페이지**: http://localhost:8000
+- **Gradio UI**: http://localhost:8000/ui
+- **API 문서**: http://localhost:8000/docs
+- **Auto RAG**: http://localhost:8000/ui → External-Web RAG → Auto RAG
+
+## ✨ Auto RAG 사용법
+
+### 🚀 자동 RAG (추천)
+1. Gradio UI 접속: http://localhost:8000/ui
+2. **External-Web RAG** 탭 클릭
+3. **🚀 Auto RAG (추천!)** 탭 선택
+4. 질문 입력 후 **🚀 자동 RAG 실행** 클릭
+5. 실시간 진행 상황을 확인하며 답변 대기
+
+**예시 질문:**
+- "삼성전자 AI 반도체 최신 동향은?"
+- "인공지능 투자 현황은 어떻습니까?"
+- "ChatGPT 관련 최신 소식을 알려주세요"
+
+### 📊 진행 상황 표시
+- **🚀 시작** (5%): RAG 처리 시작
+- **🔍 뉴스 검색** (20%): 웹에서 관련 뉴스 검색
+- **📚 벡터 DB 저장** (50%): 검색된 뉴스를 벡터 DB에 저장
+- **🤖 답변 생성** (70%): AI가 종합적인 답변 생성
+- **📝 마무리** (90%): 관련 문서 정보 정리
+- **✅ 완료** (100%): 최종 답변 및 참고 문서 표시
 
 ## 🔧 설치
 

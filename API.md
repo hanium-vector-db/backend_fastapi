@@ -536,6 +536,118 @@ GET /api/v1/news/categories
 
 ---
 
+## 🌐 External-Web RAG API
+
+### 1. 자동 RAG (추천)
+```http
+POST /api/v1/external-web/auto-rag
+```
+
+**설명:** 질의에 대해 자동으로 웹 검색하고 벡터 DB화 한 후 RAG 응답을 생성합니다. 가장 편리한 방법입니다.
+
+**요청 본문:**
+```json
+{
+  "query": "삼성전자 AI 반도체 최신 동향",
+  "max_results": 15,
+  "model_key": "qwen2.5-7b"
+}
+```
+
+**매개변수:**
+- `query` (string, 필수): 사용자의 질의
+- `max_results` (integer, 기본값: 10): 검색할 최대 뉴스 수 (5-25)
+- `model_key` (string, 선택): 사용할 모델
+
+**응답 (스트리밍):**
+```
+data: {"status": "starting", "message": "삼성전자 AI 반도체 최신 동향 관련 자동 RAG 처리를 시작합니다...", "progress": 5}
+
+data: {"status": "searching", "message": "웹에서 관련 뉴스를 검색하는 중...", "progress": 20}
+
+data: {"status": "vectorizing", "message": "12개의 뉴스 기사를 벡터 DB에 저장 완료", "progress": 50}
+
+data: {"status": "generating", "message": "AI가 종합적인 답변을 생성하는 중...", "progress": 70}
+
+data: {"status": "finalizing", "message": "관련 문서 정보를 정리하는 중...", "progress": 90}
+
+data: {"status": "completed", "response": "삼성전자의 AI 반도체 최신 동향을 분석한 결과...", "added_chunks": 12, "relevant_documents": [...], "progress": 100}
+```
+
+### 2. 주제 업로드
+```http
+POST /api/v1/external-web/upload-topic
+```
+
+**설명:** 특정 주제에 대한 웹 정보를 미리 수집하여 벡터 DB에 저장합니다.
+
+**요청 본문:**
+```json
+{
+  "topic": "인공지능 ChatGPT",
+  "max_results": 20
+}
+```
+
+### 3. RAG 질의응답
+```http
+POST /api/v1/external-web/rag-query
+```
+
+**설명:** 이미 업로드된 주제에 대해 RAG 기반 질의응답을 수행합니다.
+
+**요청 본문:**
+```json
+{
+  "prompt": "ChatGPT의 최신 기능은 무엇인가요?",
+  "top_k": 5,
+  "model_key": "qwen2.5-7b"
+}
+```
+
+---
+
+## 🗄️ Internal-DB RAG API
+
+### 1. 테이블 목록 조회
+```http
+GET /api/v1/internal-db/tables
+```
+
+### 2. 테이블 인제스트
+```http
+POST /api/v1/internal-db/ingest
+```
+
+**요청 본문:**
+```json
+{
+  "table": "knowledge",
+  "save_name": "knowledge",
+  "simulate": true,
+  "id_col": "id",
+  "title_col": "term",
+  "text_cols": ["description", "role"]
+}
+```
+
+### 3. DB RAG 질의응답
+```http
+POST /api/v1/internal-db/query
+```
+
+**요청 본문:**
+```json
+{
+  "save_name": "knowledge",
+  "question": "Self-Attention은 무엇인가?",
+  "top_k": 5,
+  "margin": 0.12
+}
+```
+
+---
+
 ## 💻 시스템 정보 API
 
 ### GPU 정보 조회
