@@ -14,7 +14,10 @@
       "Bash(xargs kill:*)",
       "Bash(pip install:*)",
       "Bash(tree:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Read(//usr/lib/**)",
+      "Bash(sudo apt:*)",
+      "Bash(/home/ubuntu_euphoria/Desktop/AWS_LOCAL_LLM/venv/bin/python:*)"
     ],
     "deny": [],
     "ask": []

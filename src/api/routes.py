@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from models.llm_handler import LLMHandler
 from models.embedding_handler import EmbeddingHandler
 from services.rag_service import RAGService
-from services.internal_db_service import InternalDBService
+from services.enhanced_internal_db_service import EnhancedInternalDBService
 import logging
 import torch
 import json
@@ -142,10 +142,10 @@ def get_rag_service(model_key: str = None):
 def get_internal_db_service():
     global internal_db_service
     if internal_db_service is None:
-        logger.info("Internal DB 서비스 초기화 중...")
+        logger.info("Enhanced Internal DB 서비스 초기화 중...")
         llm = get_llm_handler()
         emb = get_embedding_handler()
-        internal_db_service = InternalDBService(llm, emb)
+        internal_db_service = EnhancedInternalDBService(llm, emb)
     return internal_db_service
 
 @router.post("/generate")
@@ -1194,18 +1194,14 @@ async def external_web_rag_query(request: ExternalWebQueryRequest):
 # === Internal-DBMS RAG API 엔드포인트들 ===
 
 @router.get("/internal-db/tables")
-async def get_internal_db_tables():
-    """내부 데이터베이스의 테이블 목록을 조회합니다"""
+async def get_internal_db_tables(simulate: bool = None):
+    """내부 데이터베이스의 테이블 목록을 조회합니다 (자동 fallback 지원)"""
     try:
         service = get_internal_db_service()
-        tables = await service.get_db_tables()
-        
-        return {
-            "tables": tables,
-            "total_count": len(tables),
-            "status": "success"
-        }
-        
+        result = await service.get_db_tables(simulate=simulate)
+
+        return result
+
     except Exception as e:
         logger.error(f"DB 테이블 조회 오류: {e}")
         raise HTTPException(status_code=500, detail=f"DB 테이블 조회 실패: {str(e)}")
@@ -1279,3 +1275,18 @@ async def get_internal_db_status():
     except Exception as e:
         logger.error(f"Internal DB 상태 조회 오류: {e}")
         raise HTTPException(status_code=500, detail=f"Internal DB 상태 조회 실패: {str(e)}")
+
+@router.get("/internal-db/view-table/{table_name}")
+async def internal_db_view_table(table_name: str, simulate: bool = None, limit: int = 100):
+    """Internal DB 테이블 내용을 조회합니다"""
+    try:
+        service = get_internal_db_service()
+
+        # 테이블 데이터 조회 (새로운 메서드 호출)
+        result = await service.view_table_data(table_name=table_name, simulate=simulate, limit=limit)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Internal DB 테이블 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"테이블 '{table_name}' 조회 실패: {str(e)}")

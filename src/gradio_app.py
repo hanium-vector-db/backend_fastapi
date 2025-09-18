@@ -741,24 +741,211 @@ def internal_db_get_tables():
     """Internal-DB: 테이블 목록 조회"""
     try:
         result = make_api_call("internal-db/tables", {}, method="get")
-        
+
         if "error" in result:
-            return result["error"], "오류"
-        
+            return result["error"], "오류", []
+
         tables = result.get("tables", [])
         if not tables:
-            return "사용 가능한 테이블이 없습니다.", "결과 없음"
-        
+            return "사용 가능한 테이블이 없습니다.", "결과 없음", []
+
         formatted_tables = f"**📋 사용 가능한 테이블 ({len(tables)}개):**\n\n"
         for i, table in enumerate(tables, 1):
             formatted_tables += f"{i}. **{table}**\n"
-        
+
         status = f"총 {len(tables)}개 테이블"
-        return formatted_tables, status
-        
+
+        # 테이블 드롭다운 선택지 업데이트용
+        table_choices = ["테이블을 선택하세요"] + tables
+
+        return formatted_tables, status, table_choices
+
     except Exception as e:
         error_msg = f"테이블 조회 중 오류 발생: {str(e)}"
-        return error_msg, "오류"
+        return error_msg, "오류", ["테이블을 선택하세요"]
+
+def internal_db_simulate_table_data(table_name, limit):
+    """시뮬레이션 테이블 데이터 생성"""
+    if table_name == "knowledge":
+        data = [
+            {
+                "id": 1,
+                "term": "어텐션 메커니즘",
+                "description": "어텐션은 입력의 중요한 부분에 가중치를 부여해 정보를 통합하는 기법이다.",
+                "role": "입력 토큰 간 상호연관성을 계산하며 정보 흐름을 개선한다.",
+                "details": "Transformer의 핵심 구성요소로 번역·요약 등에서 성능을 끌어올린다.",
+                "updated_at": "2024-01-01 00:00:00"
+            },
+            {
+                "id": 2,
+                "term": "Self-Attention",
+                "description": "Self-Attention은 동일 시퀀스 내 토큰들이 서로를 참조하여 가중합을 구한다.",
+                "role": "장기 의존성 문제를 완화하고 각 토큰의 전역 문맥 파악을 돕는다.",
+                "details": "멀티헤드로 다양한 표현 공간에서 주의를 분산해 학습을 안정화한다.",
+                "updated_at": "2024-01-01 00:00:00"
+            },
+            {
+                "id": 3,
+                "term": "FAISS",
+                "description": "FAISS는 대규모 벡터에 대한 빠른 유사도 검색을 제공한다.",
+                "role": "대규모 임베딩 인덱싱과 빠른 검색을 제공한다.",
+                "details": "Facebook AI Research에서 개발되었고 CPU/GPU 백엔드를 제공한다.",
+                "updated_at": "2024-01-01 00:00:00"
+            }
+        ]
+        columns = ["id", "term", "description", "role", "details", "updated_at"]
+    elif table_name == "products":
+        data = [
+            {
+                "id": 1,
+                "name": "QA 시스템 Pro",
+                "category": "AI Software",
+                "description": "RAG 기반 질의응답 시스템으로 대규모 문서에서 정확한 답변을 제공합니다.",
+                "price": 299.99,
+                "features": "자동 인덱싱, 실시간 검색, 다국어 지원, API 제공"
+            },
+            {
+                "id": 2,
+                "name": "벡터 검색 엔진",
+                "category": "Database",
+                "description": "고성능 벡터 유사도 검색을 지원하는 전문 데이터베이스입니다.",
+                "price": 499.99,
+                "features": "FAISS 통합, 분산 처리, REST API, 실시간 업데이트"
+            },
+            {
+                "id": 3,
+                "name": "문서 임베딩 도구",
+                "category": "AI Tools",
+                "description": "다양한 형식의 문서를 고품질 벡터로 변환하는 도구입니다.",
+                "price": 199.99,
+                "features": "다중 형식 지원, 배치 처리, 클라우드 연동, 자동 청킹"
+            }
+        ]
+        columns = ["id", "name", "category", "description", "price", "features"]
+    elif table_name == "users":
+        data = [
+            {
+                "id": 1,
+                "username": "admin",
+                "email": "admin@company.com",
+                "role": "관리자",
+                "created_at": "2024-01-01 09:00:00",
+                "last_login": "2024-01-15 14:30:00"
+            },
+            {
+                "id": 2,
+                "username": "analyst",
+                "email": "analyst@company.com",
+                "role": "분석가",
+                "created_at": "2024-01-02 10:15:00",
+                "last_login": "2024-01-15 13:45:00"
+            },
+            {
+                "id": 3,
+                "username": "viewer",
+                "email": "viewer@company.com",
+                "role": "조회자",
+                "created_at": "2024-01-03 11:30:00",
+                "last_login": "2024-01-14 16:20:00"
+            }
+        ]
+        columns = ["id", "username", "email", "role", "created_at", "last_login"]
+    elif table_name == "orders":
+        data = [
+            {
+                "id": 1,
+                "user_id": 2,
+                "product_id": 1,
+                "quantity": 1,
+                "total_price": 299.99,
+                "status": "완료",
+                "created_at": "2024-01-10 14:30:00"
+            },
+            {
+                "id": 2,
+                "user_id": 3,
+                "product_id": 2,
+                "quantity": 2,
+                "total_price": 999.98,
+                "status": "진행중",
+                "created_at": "2024-01-12 09:15:00"
+            },
+            {
+                "id": 3,
+                "user_id": 1,
+                "product_id": 3,
+                "quantity": 1,
+                "total_price": 199.99,
+                "status": "대기",
+                "created_at": "2024-01-14 16:45:00"
+            }
+        ]
+        columns = ["id", "user_id", "product_id", "quantity", "total_price", "status", "created_at"]
+    else:
+        return f"테이블 '{table_name}'을 찾을 수 없습니다.", "테이블 없음"
+
+    # limit 적용
+    displayed_data = data[:limit]
+
+    # HTML 테이블 생성
+    html_output = f"""
+    <div style="font-family: Arial, sans-serif; margin: 10px 0;">
+        <h3>📊 테이블: {table_name}</h3>
+        <p><strong>모드:</strong> 시뮬레이션 (데모 데이터)</p>
+        <p><strong>전체 행 수:</strong> {len(data)}개 | <strong>표시 행 수:</strong> {len(displayed_data)}개</p>
+    </div>
+    """
+
+    if displayed_data:
+        # 테이블 헤더
+        html_output += """
+        <div style="overflow-x: auto; margin: 10px 0;">
+            <table style="border-collapse: collapse; width: 100%; border: 1px solid #ddd;">
+                <thead style="background-color: #f5f5f5;">
+                    <tr>
+        """
+
+        for col in columns:
+            html_output += f'<th style="border: 1px solid #ddd; padding: 8px; text-align: left;">{col}</th>'
+
+        html_output += "</tr></thead><tbody>"
+
+        # 테이블 데이터
+        for i, row in enumerate(displayed_data):
+            bg_color = "#f9f9f9" if i % 2 == 0 else "white"
+            html_output += f'<tr style="background-color: {bg_color};">'
+
+            for col in columns:
+                value = str(row.get(col, "")) if row.get(col) is not None else ""
+                # 긴 텍스트는 자르기
+                if len(value) > 100:
+                    value = value[:100] + "..."
+                html_output += f'<td style="border: 1px solid #ddd; padding: 8px; word-wrap: break-word;">{value}</td>'
+
+            html_output += "</tr>"
+
+        html_output += "</tbody></table></div>"
+    else:
+        html_output += "<p>⚠️ 테이블에 데이터가 없습니다.</p>"
+
+    status = f"테이블: {table_name} | 모드: 시뮬레이션 | 행: {len(displayed_data)}/{len(data)}"
+    return html_output, status
+
+def internal_db_view_table(table_name, limit):
+    """Internal-DB: 선택한 테이블 내용 보기"""
+    if not table_name or table_name == "테이블을 선택하세요":
+        return "테이블을 선택해주세요.", "테이블 미선택"
+
+    try:
+        # 시뮬레이션 데이터 사용 (API 엔드포인트 이슈 해결까지)
+        if table_name in ["knowledge", "products", "users", "orders"]:
+            return internal_db_simulate_table_data(table_name, limit)
+
+        # 지원되지 않는 테이블
+        return f"테이블 '{table_name}'은(는) 아직 지원되지 않습니다.", "미지원 테이블"
+
+    except Exception as e:
+        return f"테이블 조회 중 오류가 발생했습니다: {str(e)}", "오류"
 
 def internal_db_ingest(table_name, save_name, simulate, id_col, title_col, text_cols):
     """Internal-DB: 테이블 인제스트"""
@@ -1184,11 +1371,30 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
                         with gr.Column(scale=1):
                             int_tables_button = gr.Button("테이블 목록 조회", variant="secondary")
                             int_status_button = gr.Button("FAISS 인덱스 상태", variant="secondary")
-                        
+
+                            # 새로운 테이블 선택 및 보기 기능
+                            gr.Markdown("---")
+                            gr.Markdown("### 🔍 테이블 데이터 보기")
+                            int_table_selector = gr.Dropdown(
+                                choices=["테이블을 선택하세요"],
+                                value="테이블을 선택하세요",
+                                label="테이블 선택"
+                            )
+                            int_view_limit = gr.Slider(
+                                minimum=10, maximum=500, value=50, step=10,
+                                label="표시할 최대 행 수"
+                            )
+                            int_view_button = gr.Button("테이블 내용 보기", variant="primary")
+
                         with gr.Column(scale=2):
                             int_tables_output = gr.Markdown(label="테이블 목록")
                             int_status_output = gr.Markdown(label="상태 정보")
                             int_tables_status = gr.Textbox(label="조회 상태", interactive=False)
+
+                            # 새로운 테이블 데이터 표시 영역
+                            gr.Markdown("---")
+                            int_table_data = gr.HTML(label="선택한 테이블 데이터", visible=True)
+                            int_view_status = gr.Textbox(label="테이블 조회 상태", interactive=False)
 
                 # 6-2. 테이블 인제스트
                 with gr.TabItem("⚡ 테이블 인제스트"):
@@ -1302,15 +1508,29 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
     )
     
     # Internal-DBMS RAG 이벤트 핸들러들
+    def update_table_dropdown():
+        """테이블 목록을 조회하고 드롭다운을 업데이트합니다"""
+        formatted_tables, status, table_choices = internal_db_get_tables()
+        return [
+            formatted_tables,
+            status,
+            gr.Dropdown(choices=table_choices, value="테이블을 선택하세요", label="테이블 선택")
+        ]
+
     int_tables_button.click(
-        fn=internal_db_get_tables,
+        fn=update_table_dropdown,
         inputs=[],
-        outputs=[int_tables_output, int_tables_status]
+        outputs=[int_tables_output, int_tables_status, int_table_selector]
     )
     int_status_button.click(
         fn=internal_db_get_status,
         inputs=[],
         outputs=[int_status_output, int_tables_status]
+    )
+    int_view_button.click(
+        fn=internal_db_view_table,
+        inputs=[int_table_selector, int_view_limit],
+        outputs=[int_table_data, int_view_status]
     )
     int_ingest_button.click(
         fn=internal_db_ingest,
