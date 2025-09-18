@@ -156,8 +156,8 @@ if __name__ == "__main__":
     import uvicorn
     # Use config values for server
     uvicorn.run(
-        "main:app", 
-        host=server_config['host'], 
-        port=server_config['port'], 
-        reload=server_config['reload']
+        "main:app",
+        host=server_config['host'],
+        port=server_config['port'],
+        reload=True  # 개발 시 자동 리로드 활성화
     )

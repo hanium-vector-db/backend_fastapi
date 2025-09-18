@@ -2,9 +2,15 @@ import os
 import sys
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional
+import time
+import math
+import re
+import unicodedata
+from typing import List, Dict, Any, Optional, Tuple
 import pandas as pd
 from dataclasses import dataclass
+from collections import defaultdict
+from functools import lru_cache
 
 # LangChain imports
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -15,8 +21,13 @@ from langchain_core.documents import Document
 
 # Database imports
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
-from sqlalchemy import text
+from sqlalchemy import text, inspect as sa_inspect
+from sqlalchemy.engine import Result
 import sqlite3
+
+# Transformers for model handling
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -26,7 +37,7 @@ from utils.config_loader import config
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-@dataclass 
+@dataclass
 class InternalDBConfig:
     # 설정 파일에서 값들을 읽어옴
     def __init__(self):
@@ -38,6 +49,14 @@ class InternalDBConfig:
         self.max_context_chars: int = internal_db_config['max_context_chars']
         self.max_new_tokens: int = internal_db_config['max_new_tokens']
         self.temperature: float = internal_db_config['temperature']
+        # 고급 검색 설정 추가
+        self.fetch_multiplier: int = 4    # 1차 검색 배수
+        self.per_title_cap: int = 3       # 같은 제목에서 최대 청크 수
+        self.sim_floor: float = 0.35      # 최소 유사도
+        self.min_new_tokens: int = 48     # 최소 생성 토큰
+        self.top_p: float = 0.9
+        self.top_k_sampling: int = 50
+        self.repetition_penalty: float = 1.0
 
 class InternalDBService:
     def __init__(self, llm_handler, embedding_handler):
@@ -128,77 +147,24 @@ class InternalDBService:
             raise
 
     async def query(self, save_name: str, question: str, top_k: int = 5, margin: float = 0.12) -> Dict[str, Any]:
-        """FAISS 인덱스를 사용하여 질의응답을 수행합니다"""
+        """FAISS 인덱스를 사용하여 고급 질의응답을 수행합니다"""
         try:
+            T0 = time.perf_counter()
             logger.info(f"질의 시작: '{question}' (save_name: {save_name})")
-            
+
             # FAISS 인덱스 로드
             vectorstore = await self._load_faiss_index(save_name)
-            
-            # 유사도 검색
-            docs_with_scores = vectorstore.similarity_search_with_score(question, k=top_k)
-            
-            # 마진 필터링 (1등 점수 대비 margin 이내의 결과만 유지)
-            if docs_with_scores:
-                best_score = docs_with_scores[0][1]
-                filtered_docs = [
-                    (doc, score) for doc, score in docs_with_scores 
-                    if score <= best_score + margin
-                ]
-            else:
-                filtered_docs = []
-            
-            if not filtered_docs:
-                return {
-                    "answer": "관련 정보를 찾을 수 없습니다. 다른 키워드로 시도해보세요.",
-                    "sources": []
-                }
-            
-            # 컨텍스트 구성
-            context_parts = []
-            sources = []
-            
-            for i, (doc, score) in enumerate(filtered_docs):
-                marker = f"S{i+1}"
-                context_parts.append(f"《{marker}》 {doc.page_content}")
-                
-                sources.append({
-                    "marker": marker,
-                    "id": str(doc.metadata.get("id", "Unknown")),
-                    "title": str(doc.metadata.get("title", "Unknown")),
-                    "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
-                    "score": float(score)
-                })
-            
-            context = "\n".join(context_parts[:self.config.max_context_chars])
-            
-            # LLM 답변 생성
-            prompt_template = """다음 컨텍스트를 참고하여 질문에 답변해주세요. 답변은 한국어로 최소 2문장 이상 작성하세요.
 
-컨텍스트:
-{context}
-
-질문: {question}
-
-답변:"""
-            
-            full_prompt = prompt_template.format(context=context, question=question)
-            
-            # LLM 호출 (동기 방식을 비동기로 래핑)
-            answer = await asyncio.to_thread(
-                self.llm_handler.generate, 
-                full_prompt, 
-                max_length=self.config.max_new_tokens,
-                stream=False
+            # 고급 검색 수행 (비동기 래핑)
+            result = await asyncio.to_thread(
+                self._answer_question_sync, vectorstore, question, top_k, margin
             )
-            
-            logger.info(f"질의 완료: {len(filtered_docs)}개 문서 참조")
-            
-            return {
-                "answer": answer,
-                "sources": sources
-            }
-            
+
+            T1 = time.perf_counter()
+            logger.info(f"질의 완료: 총 소요시간 {T1-T0:.3f}초")
+
+            return result
+
         except Exception as e:
             logger.error(f"질의 오류: {e}")
             raise
@@ -367,3 +333,162 @@ class InternalDBService:
             return vectorstore
         else:
             raise FileNotFoundError(f"FAISS 인덱스를 찾을 수 없습니다: {save_path}")
+
+    def _answer_question_sync(self, vectorstore, question: str, top_k: int = 5, margin: float = 0.12) -> Dict[str, Any]:
+        """고급 검색과 답변 생성을 동기적으로 수행합니다"""
+        try:
+            # 1. 고급 검색 수행
+            T_search = time.perf_counter()
+
+            # 더 많은 후보를 먼저 검색
+            initial_k = min(top_k * self.config.fetch_multiplier, 20)
+
+            # 유사도 검색 수행
+            raw_results = vectorstore.similarity_search_with_score(question, k=initial_k)
+
+            # 유사도 필터링 및 정렬
+            filtered_results = []
+            title_counts = defaultdict(int)
+
+            for doc, score in raw_results:
+                # 유사도 임계값 체크
+                if score < self.config.sim_floor:
+                    continue
+
+                # 같은 제목에서 너무 많이 가져오지 않도록 제한
+                title = doc.metadata.get("title", "Unknown")
+                if title_counts[title] >= self.config.per_title_cap:
+                    continue
+
+                filtered_results.append((doc, score))
+                title_counts[title] += 1
+
+                # 충분한 결과를 모았으면 중단
+                if len(filtered_results) >= top_k:
+                    break
+
+            logger.info(f"검색 완료: {len(filtered_results)}개 문서 검색 ({time.perf_counter() - T_search:.3f}초)")
+
+            if not filtered_results:
+                return {
+                    "answer": "지식베이스에서 답을 찾지 못했습니다.",
+                    "sources": "참고할 출처를 찾지 못했습니다."
+                }
+
+            # 2. 컨텍스트 준비
+            contexts = []
+            sources_info = []
+            current_length = 0
+
+            for doc, score in filtered_results:
+                # 컨텍스트 길이 제한 체크
+                doc_content = doc.page_content
+                if current_length + len(doc_content) > self.config.max_context_chars:
+                    remaining = self.config.max_context_chars - current_length
+                    if remaining > 100:  # 최소한 100자는 추가
+                        doc_content = doc_content[:remaining]
+                    else:
+                        break
+
+                contexts.append(doc_content)
+                current_length += len(doc_content)
+
+                # 소스 정보 수집
+                sources_info.append({
+                    "title": doc.metadata.get("title", "Unknown"),
+                    "score": float(score),
+                    "content_preview": doc_content[:200] + "..." if len(doc_content) > 200 else doc_content
+                })
+
+            context_text = "\n\n---\n\n".join(contexts)
+
+            # 3. LLM으로 답변 생성
+            T_gen = time.perf_counter()
+
+            prompt = f"""다음 컨텍스트를 참고하여 질문에 대한 답변을 작성해주세요.
+
+컨텍스트:
+{context_text}
+
+질문: {question}
+
+답변:"""
+
+            # LLM 생성 (LLMHandler의 generate 메서드와 호환되도록 수정)
+            answer = self.llm_handler.generate(
+                prompt,
+                max_length=self.config.max_new_tokens,
+                temperature=self.config.temperature
+            )
+
+            logger.info(f"답변 생성 완료 ({time.perf_counter() - T_gen:.3f}초)")
+
+            # 4. 결과 정리
+            sources_text = "\n".join([
+                f"- {src['title']} (유사도: {src['score']:.3f})"
+                for src in sources_info[:3]  # 상위 3개 출처만 표시
+            ])
+
+            return {
+                "answer": answer.strip(),
+                "sources": sources_text,
+                "context_docs": len(contexts),
+                "total_context_chars": current_length
+            }
+
+        except Exception as e:
+            logger.error(f"답변 생성 오류: {e}")
+            return {
+                "answer": f"답변 생성 중 오류가 발생했습니다: {str(e)}",
+                "sources": "오류로 인해 출처를 제공할 수 없습니다."
+            }
+
+    async def view_table_data(self, table_name: str, simulate: bool = None, limit: int = 100) -> Dict[str, Any]:
+        """테이블 데이터를 조회합니다"""
+        try:
+            if simulate:
+                # 시뮬레이션 모드
+                df = self._create_simulation_data()
+                columns = list(df.columns)
+                data = df.head(limit).to_dict(orient='records')
+            else:
+                # 실제 DB에서 조회
+                engine = create_async_engine(self.async_db_url)
+
+                async with engine.begin() as conn:
+                    # 테이블 존재 확인
+                    tables_result = await conn.execute(text("SHOW TABLES"))
+                    tables = [row[0] for row in tables_result.fetchall()]
+
+                    if table_name not in tables:
+                        raise ValueError(f"테이블 '{table_name}'이(가) 존재하지 않습니다. 사용 가능한 테이블: {', '.join(tables)}")
+
+                    # 컬럼 정보 조회
+                    columns_result = await conn.execute(text(f"DESCRIBE {table_name}"))
+                    columns = [row[0] for row in columns_result.fetchall()]
+
+                    # 데이터 조회
+                    data_result = await conn.execute(text(f"SELECT * FROM {table_name} LIMIT {limit}"))
+                    rows = data_result.fetchall()
+
+                    # 전체 행 수 조회
+                    count_result = await conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
+                    total_count = count_result.scalar()
+
+                await engine.dispose()
+
+                # 딕셔너리 형태로 변환
+                data = [dict(zip(columns, row)) for row in rows]
+
+            return {
+                "table_name": table_name,
+                "columns": columns,
+                "data": data,
+                "row_count": len(data),
+                "total_count": total_count if not simulate else len(data),
+                "limited": len(data) < total_count if not simulate else False
+            }
+
+        except Exception as e:
+            logger.error(f"테이블 데이터 조회 오류: {e}")
+            raise
