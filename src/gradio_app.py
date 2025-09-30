@@ -1072,6 +1072,193 @@ def internal_db_get_status():
         error_msg = f"상태 조회 중 오류 발생: {str(e)}"
         return error_msg, "오류"
 
+# === 음성 기능 함수들 ===
+def text_to_speech_gradio(text, language, slow):
+    """텍스트를 음성으로 변환 (Gradio용)"""
+    if not text.strip():
+        return None, "텍스트를 입력해주세요."
+
+    try:
+        payload = {
+            "text": text,
+            "language": language,
+            "slow": slow
+        }
+
+        response = requests.post(f"{API_URL}/speech/text-to-speech", json=payload, timeout=30)
+
+        if response.status_code == 200:
+            # 임시 파일로 저장
+            import tempfile
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+            temp_file.write(response.content)
+            temp_file.close()
+
+            return temp_file.name, f"✅ 음성 합성 완료! (언어: {language})"
+        else:
+            error_detail = response.json().get("detail", "알 수 없는 오류")
+            return None, f"❌ 음성 합성 실패: {error_detail}"
+
+    except Exception as e:
+        return None, f"❌ 오류 발생: {str(e)}"
+
+def speech_to_text_gradio(audio_file, prefer_whisper):
+    """음성을 텍스트로 변환 (Gradio용)"""
+    if audio_file is None:
+        return "", "음성 파일을 업로드해주세요."
+
+    try:
+        with open(audio_file, 'rb') as f:
+            files = {'audio_file': f}
+            data = {'prefer_whisper': prefer_whisper}
+
+            response = requests.post(f"{API_URL}/speech/speech-to-text", files=files, data=data, timeout=60)
+
+        if response.status_code == 200:
+            result = response.json()
+            if result["success"]:
+                text = result["text"]
+                method = result.get("method", "unknown")
+                confidence = result.get("confidence", 0.0)
+                language = result.get("language", "unknown")
+
+                status = f"✅ 음성 인식 완료! (방법: {method}, 신뢰도: {confidence:.2f}, 언어: {language})"
+                return text, status
+            else:
+                return "", f"❌ 음성 인식 실패: {result.get('error', '알 수 없는 오류')}"
+        else:
+            error_detail = response.json().get("detail", "알 수 없는 오류")
+            return "", f"❌ 음성 인식 실패: {error_detail}"
+
+    except Exception as e:
+        return "", f"❌ 오류 발생: {str(e)}"
+
+def voice_chat_gradio(text, model_key, voice_language, voice_slow):
+    """음성 채팅 (Gradio용)"""
+    if not text.strip():
+        return None, "텍스트를 입력해주세요.", ""
+
+    try:
+        payload = {
+            "text": text,
+            "model_key": model_key if model_key != "기본 모델" else None,
+            "voice_language": voice_language,
+            "voice_slow": voice_slow
+        }
+
+        response = requests.post(f"{API_URL}/speech/voice-chat", json=payload, timeout=120)
+
+        if response.status_code == 200:
+            response_text = response.headers.get('X-Response-Text', '응답 텍스트를 가져올 수 없습니다.')
+
+            # 임시 파일로 저장
+            import tempfile
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+            temp_file.write(response.content)
+            temp_file.close()
+
+            status = f"✅ 음성 채팅 완료! (모델: {model_key}, 언어: {voice_language})"
+            return temp_file.name, response_text, status
+        else:
+            error_detail = response.json().get("detail", "알 수 없는 오류")
+            return None, "", f"❌ 음성 채팅 실패: {error_detail}"
+
+    except Exception as e:
+        return None, "", f"❌ 오류 발생: {str(e)}"
+
+def get_speech_service_status():
+    """음성 서비스 상태 조회"""
+    try:
+        response = requests.get(f"{API_URL}/speech/status", timeout=10)
+
+        if response.status_code == 200:
+            result = response.json()
+
+            status_text = f"""**🎤 음성 서비스 상태**
+
+**Whisper (음성인식):** {'✅ 사용 가능' if result.get('whisper_available') else '❌ 사용 불가'}
+**Google STT:** {'✅ 사용 가능' if result.get('google_stt_available') else '❌ 사용 불가'}
+**gTTS (음성합성):** {'✅ 사용 가능' if result.get('gtts_available') else '❌ 사용 불가'}
+**마이크:** {'✅ 감지됨' if result.get('microphone_available') else '❌ 감지 안됨'}
+**지원 언어 수:** {result.get('supported_languages', 0)}개
+**전체 상태:** {result.get('status', 'unknown')}
+"""
+            return status_text, "상태 조회 완료"
+        else:
+            return "음성 서비스 상태를 가져올 수 없습니다.", "오류"
+
+    except Exception as e:
+        return f"오류 발생: {str(e)}", "오류"
+
+def get_streaming_tts_status():
+    """스트리밍 TTS 서비스 상태 조회"""
+    try:
+        response = requests.get(f"{API_URL}/speech/streaming-tts/status", timeout=10)
+
+        if response.status_code == 200:
+            result = response.json()
+
+            status_text = f"""**🎯 실시간 스트리밍 TTS 상태**
+
+**스트리밍 TTS:** {'✅ 사용 가능' if result.get('streaming_tts_available') else '❌ 사용 불가'}
+**문장 기반 TTS:** {'✅ 사용 가능' if result.get('sentence_tts_available') else '❌ 사용 불가'}
+**음성 서비스:** {'✅ 사용 가능' if result.get('speech_service_available') else '❌ 사용 불가'}
+**Whisper:** {'✅ 사용 가능' if result.get('whisper_available') else '❌ 사용 불가'}
+**gTTS:** {'✅ 사용 가능' if result.get('gtts_available') else '❌ 사용 불가'}
+
+**지원 기능:**
+"""
+            for feature in result.get('supported_features', []):
+                status_text += f"• {feature}\n"
+
+            status_text += f"\n**지원 언어:** {len(result.get('supported_languages', {}))}개"
+            status_text += f"\n**전체 상태:** {result.get('status', 'unknown')}"
+
+            return status_text, "스트리밍 TTS 상태 조회 완료"
+        else:
+            return "스트리밍 TTS 상태를 가져올 수 없습니다.", "오류"
+
+    except Exception as e:
+        return f"오류 발생: {str(e)}", "오류"
+
+def streaming_generate_with_voice_gradio(prompt, model_key, voice_language, voice_slow, read_partial):
+    """실시간 스트리밍 텍스트 생성 및 음성 읽기 (Gradio용)"""
+    if not prompt.strip():
+        return "프롬프트를 입력해주세요.", "", "오류"
+
+    try:
+        payload = {
+            "prompt": prompt,
+            "model_key": model_key if model_key != "기본 모델" else None,
+            "voice_language": voice_language,
+            "voice_slow": voice_slow,
+            "read_partial": read_partial
+        }
+
+        # 참고: Gradio에서는 스트리밍 응답을 직접 처리하기 어려우므로
+        # 사용자에게 전용 페이지로 안내
+        message = f"""🎯 **실시간 스트리밍 음성 기능은 전용 페이지에서 이용하세요!**
+
+**프롬프트:** {prompt}
+**모델:** {model_key}
+**언어:** {voice_language}
+**설정:** 느린음성={voice_slow}, 부분읽기={read_partial}
+
+**전용 페이지 링크:** [실시간 스트리밍 음성 페이지](/streaming-voice)
+
+전용 페이지에서는 다음 기능을 제공합니다:
+• ⚡ AI가 텍스트 생성하는 동시에 완성된 문장을 실시간 음성으로 읽기
+• 🎵 음성 대기열 및 자동 재생
+• 📊 실시간 진행 상황 표시
+• 🔊 개별 문장 음성 재생 제어
+
+더 나은 경험을 위해 전용 페이지를 이용해주세요!"""
+
+        return message, "전용 페이지 이용 권장", f"설정: {model_key}, {voice_language}"
+
+    except Exception as e:
+        return f"❌ 오류 발생: {str(e)}", "", "오류"
+
 def update_model_list():
     """UI가 로드될 때 서버에서 모델 목록을 동적으로 가져옵니다."""
     logger.info("UI: 모델 목록을 서버에서 가져오는 중...")
@@ -1359,7 +1546,142 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
                             ext_query_docs = gr.Markdown(label="참고 문서")
                             ext_query_status = gr.Textbox(label="상태 정보", interactive=False)
 
-        # 6. Internal-DBMS RAG 탭 (NEW!)
+        # 6. 음성 기능 탭 (NEW!)
+        with gr.TabItem("🎤 음성 기능 (NEW!)"):
+            gr.Markdown("### 🆕 AI 음성 대화 시스템")
+            gr.Markdown("**음성으로 AI와 대화하고 음성으로 답변을 받아보세요!**")
+            gr.Markdown("**🎯 추천**: 더 나은 경험을 위해 [전용 음성 채팅 페이지](/voice)를 이용해주세요!")
+
+            with gr.Tabs():
+                # 6-1. 음성 서비스 상태
+                with gr.TabItem("📊 서비스 상태"):
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            speech_status_button = gr.Button("🔍 음성 서비스 상태 확인", variant="primary")
+
+                        with gr.Column(scale=2):
+                            speech_status_output = gr.Markdown(label="음성 서비스 상태")
+                            speech_status_info = gr.Textbox(label="상태 정보", interactive=False)
+
+                # 6-2. 텍스트 → 음성 (TTS)
+                with gr.TabItem("📢 텍스트→음성"):
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            tts_text = gr.Textbox(
+                                lines=4,
+                                label="음성으로 변환할 텍스트",
+                                placeholder="안녕하세요! 저는 AI 어시스턴트입니다."
+                            )
+                            tts_language = gr.Dropdown(
+                                choices=["ko", "en", "ja", "zh", "es", "fr", "de"],
+                                value="ko",
+                                label="음성 언어"
+                            )
+                            tts_slow = gr.Checkbox(label="느린 음성", value=False)
+                            tts_button = gr.Button("🔊 음성으로 변환", variant="primary")
+
+                        with gr.Column(scale=2):
+                            tts_audio_output = gr.Audio(label="생성된 음성", type="filepath")
+                            tts_status = gr.Textbox(label="변환 상태", interactive=False)
+
+                # 6-3. 음성 → 텍스트 (STT)
+                with gr.TabItem("🎙️ 음성→텍스트"):
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            stt_audio_input = gr.Audio(
+                                label="음성 파일 업로드",
+                                type="filepath"
+                            )
+                            stt_prefer_whisper = gr.Checkbox(
+                                label="Whisper 우선 사용 (더 정확함)",
+                                value=True
+                            )
+                            stt_button = gr.Button("📝 텍스트로 변환", variant="primary")
+
+                        with gr.Column(scale=2):
+                            stt_text_output = gr.Textbox(
+                                lines=4,
+                                label="인식된 텍스트",
+                                interactive=False
+                            )
+                            stt_status = gr.Textbox(label="인식 상태", interactive=False)
+
+                # 6-4. 음성 채팅
+                with gr.TabItem("💬 음성 채팅"):
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            voice_chat_text = gr.Textbox(
+                                lines=3,
+                                label="채팅 메시지",
+                                placeholder="AI에게 질문해보세요!"
+                            )
+                            voice_chat_model = gr.Dropdown(
+                                label="사용할 모델",
+                                choices=["기본 모델", "qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"],
+                                value="기본 모델"
+                            )
+                            voice_chat_language = gr.Dropdown(
+                                choices=["ko", "en", "ja", "zh"],
+                                value="ko",
+                                label="응답 음성 언어"
+                            )
+                            voice_chat_slow = gr.Checkbox(label="느린 음성", value=False)
+                            voice_chat_button = gr.Button("🎤 음성 채팅", variant="primary")
+
+                        with gr.Column(scale=2):
+                            voice_chat_audio = gr.Audio(label="AI 음성 응답", type="filepath")
+                            voice_chat_response = gr.Textbox(
+                                lines=4,
+                                label="AI 응답 텍스트",
+                                interactive=False
+                            )
+                            voice_chat_status = gr.Textbox(label="채팅 상태", interactive=False)
+
+                # 6-5. 실시간 스트리밍 음성 (NEW!)
+                with gr.TabItem("🎯 스트리밍 음성 (NEW!)"):
+                    gr.Markdown("### ⚡ 실시간 스트리밍 TTS")
+                    gr.Markdown("**AI가 텍스트를 생성하는 동시에 완성된 문장을 실시간으로 읽어줍니다!**")
+                    gr.Markdown("**🎯 최고의 경험을 위해 [전용 스트리밍 페이지](/streaming-voice)를 이용하세요!**")
+
+                    with gr.Tabs():
+                        # 6-5-1. 스트리밍 TTS 상태
+                        with gr.TabItem("📊 스트리밍 상태"):
+                            with gr.Row():
+                                with gr.Column(scale=1):
+                                    streaming_status_button = gr.Button("🔍 스트리밍 TTS 상태 확인", variant="primary")
+
+                                with gr.Column(scale=2):
+                                    streaming_status_output = gr.Markdown(label="스트리밍 TTS 상태")
+                                    streaming_status_info = gr.Textbox(label="상태 정보", interactive=False)
+
+                        # 6-5-2. 스트리밍 텍스트 생성 (안내용)
+                        with gr.TabItem("🚀 스트리밍 생성"):
+                            with gr.Row():
+                                with gr.Column(scale=1):
+                                    streaming_prompt = gr.Textbox(
+                                        lines=4,
+                                        label="프롬프트",
+                                        placeholder="AI에게 질문하거나 요청하세요...\n예: 인공지능의 미래에 대해 설명해주세요."
+                                    )
+                                    streaming_model = gr.Dropdown(
+                                        label="사용할 모델",
+                                        choices=["기본 모델", "qwen2.5-7b", "llama3.1-8b", "gemma-3-4b"],
+                                        value="기본 모델"
+                                    )
+                                    streaming_voice_lang = gr.Dropdown(
+                                        choices=["ko", "en", "ja", "zh"],
+                                        value="ko",
+                                        label="음성 언어"
+                                    )
+                                    streaming_voice_slow = gr.Checkbox(label="느린 음성", value=False)
+                                    streaming_read_partial = gr.Checkbox(label="부분 문장도 읽기", value=True)
+                                    streaming_generate_button = gr.Button("🎯 전용 페이지로 이동", variant="primary")
+
+                                with gr.Column(scale=2):
+                                    streaming_output = gr.Markdown(label="안내 메시지")
+                                    streaming_info = gr.Textbox(label="상태", interactive=False)
+
+        # 7. Internal-DBMS RAG 탭 (NEW!)
         with gr.TabItem("🗄️ Internal-DBMS RAG (NEW!)"):
             gr.Markdown("### 🆕 내부 데이터베이스 기반 RAG 시스템")
             gr.Markdown("내부 DB 테이블을 벡터화하여 질의응답하는 시스템입니다.")
@@ -1542,6 +1864,40 @@ with gr.Blocks(theme=gr.themes.Soft(), title="LLM 서버 UI") as gradio_ui:
         fn=internal_db_query,
         inputs=[int_query_save_name, int_query_question, int_query_top_k, int_query_margin],
         outputs=[int_query_answer, int_query_sources, int_query_status]
+    )
+
+    # 음성 기능 이벤트 핸들러들
+    speech_status_button.click(
+        fn=get_speech_service_status,
+        inputs=[],
+        outputs=[speech_status_output, speech_status_info]
+    )
+    tts_button.click(
+        fn=text_to_speech_gradio,
+        inputs=[tts_text, tts_language, tts_slow],
+        outputs=[tts_audio_output, tts_status]
+    )
+    stt_button.click(
+        fn=speech_to_text_gradio,
+        inputs=[stt_audio_input, stt_prefer_whisper],
+        outputs=[stt_text_output, stt_status]
+    )
+    voice_chat_button.click(
+        fn=voice_chat_gradio,
+        inputs=[voice_chat_text, voice_chat_model, voice_chat_language, voice_chat_slow],
+        outputs=[voice_chat_audio, voice_chat_response, voice_chat_status]
+    )
+
+    # 스트리밍 음성 기능 이벤트 핸들러들
+    streaming_status_button.click(
+        fn=get_streaming_tts_status,
+        inputs=[],
+        outputs=[streaming_status_output, streaming_status_info]
+    )
+    streaming_generate_button.click(
+        fn=streaming_generate_with_voice_gradio,
+        inputs=[streaming_prompt, streaming_model, streaming_voice_lang, streaming_voice_slow, streaming_read_partial],
+        outputs=[streaming_output, streaming_info]
     )
 
 if __name__ == "__main__":

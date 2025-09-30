@@ -374,3 +374,63 @@ class LLMHandler:
     def get_model_info(cls, model_key: str) -> Optional[Dict[str, Any]]:
         """특정 모델 정보 반환"""
         return cls.SUPPORTED_MODELS.get(model_key)
+
+    def generate_stream(self, prompt: str, model_key: str = None, max_length: int = 512, temperature: float = 0.7) -> Iterator[Dict[str, Any]]:
+        """스트리밍 텍스트 생성 (딕셔너리 형태로 반환)"""
+        try:
+            # 모델별 프롬프트 포맷팅
+            formatted_prompt = self._format_prompt(prompt)
+
+            inputs = self.tokenizer(
+                formatted_prompt,
+                return_tensors="pt",
+                padding=True,
+                truncation=True
+            ).to(self.model.device)
+
+            # TextIteratorStreamer 설정
+            streamer = TextIteratorStreamer(
+                self.tokenizer,
+                timeout=60,
+                skip_prompt=True,
+                skip_special_tokens=True
+            )
+
+            generation_kwargs = {
+                'inputs': inputs.input_ids,
+                'attention_mask': inputs.attention_mask,
+                'max_new_tokens': max_length,
+                'temperature': temperature,
+                'do_sample': True,
+                'pad_token_id': self.tokenizer.pad_token_id,
+                'eos_token_id': self.tokenizer.eos_token_id,
+                'streamer': streamer,
+            }
+
+            # 백그라운드에서 생성 실행
+            thread = threading.Thread(target=self.model.generate, kwargs=generation_kwargs)
+            thread.start()
+
+            # 스트리밍 토큰 반환
+            for text in streamer:
+                if text:
+                    yield {
+                        "content": text,
+                        "done": False,
+                        "error": None
+                    }
+
+            # 완료 시그널
+            yield {
+                "content": "",
+                "done": True,
+                "error": None
+            }
+
+        except Exception as e:
+            logger.error(f"스트리밍 텍스트 생성 오류: {e}")
+            yield {
+                "content": "",
+                "done": True,
+                "error": str(e)
+            }

@@ -6,14 +6,18 @@ from core.config import settings
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from typing import List
 from models.llm_handler import LLMHandler
 from models.embedding_handler import EmbeddingHandler
 from services.rag_service import RAGService
 from services.enhanced_internal_db_service import EnhancedInternalDBService
+from services.speech_service import SpeechService
+from services.streaming_tts_service import StreamingTTSService, SentenceBasedTTSService
 import logging
 import torch
 import json
 import asyncio
+from fastapi import UploadFile, File
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -104,11 +108,42 @@ class InternalDBQueryRequest(BaseModel):
     top_k: int = 5
     margin: float = 0.12
 
+# 음성 관련 요청 모델들
+class TextToSpeechRequest(BaseModel):
+    text: str
+    language: str = "ko"
+    slow: bool = False
+
+class SpeechToTextRequest(BaseModel):
+    prefer_whisper: bool = True
+
+class VoiceChatRequest(BaseModel):
+    text: str = None  # 텍스트 입력 (음성 대신)
+    model_key: str = None
+    voice_language: str = "ko"
+    voice_slow: bool = False
+
+# 실시간 스트리밍 TTS 요청 모델들
+class StreamingTTSRequest(BaseModel):
+    prompt: str
+    model_key: str = None
+    voice_language: str = "ko"
+    voice_slow: bool = False
+    read_partial: bool = True  # 부분 문장도 읽을지 여부
+
+class SentencesTTSRequest(BaseModel):
+    sentences: List[str]
+    language: str = "ko"
+    slow: bool = False
+
 # Initialize handlers (lazy loading)
 llm_handler = None
 embedding_handler = None
 rag_service = None
 internal_db_service = None
+speech_service = None
+streaming_tts_service = None
+sentence_tts_service = None
 
 def get_llm_handler(model_key: str = None):
     global llm_handler
@@ -147,6 +182,29 @@ def get_internal_db_service():
         emb = get_embedding_handler()
         internal_db_service = EnhancedInternalDBService(llm, emb)
     return internal_db_service
+
+def get_speech_service():
+    global speech_service
+    if speech_service is None:
+        logger.info("음성 서비스 초기화 중...")
+        speech_service = SpeechService()
+    return speech_service
+
+def get_streaming_tts_service():
+    global streaming_tts_service
+    if streaming_tts_service is None:
+        logger.info("스트리밍 TTS 서비스 초기화 중...")
+        speech_svc = get_speech_service()
+        streaming_tts_service = StreamingTTSService(speech_svc)
+    return streaming_tts_service
+
+def get_sentence_tts_service():
+    global sentence_tts_service
+    if sentence_tts_service is None:
+        logger.info("문장 기반 TTS 서비스 초기화 중...")
+        speech_svc = get_speech_service()
+        sentence_tts_service = SentenceBasedTTSService(speech_svc)
+    return sentence_tts_service
 
 @router.post("/generate")
 async def generate_response(request: GenerateRequest):
@@ -1290,3 +1348,390 @@ async def internal_db_view_table(table_name: str, simulate: bool = None, limit: 
     except Exception as e:
         logger.error(f"Internal DB 테이블 조회 오류: {e}")
         raise HTTPException(status_code=500, detail=f"테이블 '{table_name}' 조회 실패: {str(e)}")
+
+# === 음성 처리 API 엔드포인트들 ===
+
+@router.post("/speech/text-to-speech")
+async def text_to_speech(request: TextToSpeechRequest):
+    """텍스트를 음성으로 변환합니다"""
+    try:
+        service = get_speech_service()
+        result = service.text_to_speech(
+            text=request.text,
+            language=request.language,
+            slow=request.slow
+        )
+
+        if result["success"]:
+            from fastapi.responses import FileResponse
+            return FileResponse(
+                result["audio_file"],
+                media_type="audio/mpeg",
+                filename="speech.mp3",
+                headers={
+                    "Content-Disposition": "attachment; filename=speech.mp3",
+                    "X-Duration-Estimate": str(result.get("duration_estimate", 0))
+                }
+            )
+        else:
+            raise HTTPException(status_code=400, detail=result["error"])
+
+    except Exception as e:
+        logger.error(f"TTS 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"음성 합성 실패: {str(e)}")
+
+@router.post("/speech/speech-to-text")
+async def speech_to_text(
+    audio_file: UploadFile = File(...),
+    prefer_whisper: bool = True
+):
+    """음성 파일을 텍스트로 변환합니다"""
+    try:
+        service = get_speech_service()
+
+        # 업로드된 파일을 임시 파일로 저장
+        import tempfile
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        content = await audio_file.read()
+        temp_file.write(content)
+        temp_file.close()
+
+        # 음성 인식 수행
+        result = service.speech_to_text(temp_file.name, prefer_whisper)
+
+        # 임시 파일 정리
+        service.cleanup_temp_file(temp_file.name)
+
+        if result["success"]:
+            return {
+                "text": result["text"],
+                "language": result.get("language", "unknown"),
+                "confidence": result.get("confidence", 0.0),
+                "method": result.get("method", "unknown"),
+                "success": True
+            }
+        else:
+            return {
+                "text": "",
+                "error": result["error"],
+                "method": result.get("method", "unknown"),
+                "success": False
+            }
+
+    except Exception as e:
+        logger.error(f"STT 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"음성 인식 실패: {str(e)}")
+
+@router.post("/speech/voice-chat")
+async def voice_chat(request: VoiceChatRequest):
+    """음성 채팅: 텍스트 입력 → LLM 응답 → 음성 출력"""
+    try:
+        if not request.text:
+            raise HTTPException(status_code=400, detail="입력 텍스트가 필요합니다")
+
+        # 1. LLM으로 응답 생성
+        llm = get_llm_handler(request.model_key)
+        response_text = llm.chat_generate(request.text, stream=False)
+
+        # 2. 응답을 음성으로 변환
+        speech_service = get_speech_service()
+        tts_result = speech_service.text_to_speech(
+            text=response_text,
+            language=request.voice_language,
+            slow=request.voice_slow
+        )
+
+        if tts_result["success"]:
+            from fastapi.responses import FileResponse
+            return FileResponse(
+                tts_result["audio_file"],
+                media_type="audio/mpeg",
+                filename="chat_response.mp3",
+                headers={
+                    "Content-Disposition": "attachment; filename=chat_response.mp3",
+                    "X-Response-Text": response_text,
+                    "X-Duration-Estimate": str(tts_result.get("duration_estimate", 0))
+                }
+            )
+        else:
+            # TTS 실패 시 텍스트만 반환
+            return {
+                "response_text": response_text,
+                "audio_available": False,
+                "error": tts_result["error"]
+            }
+
+    except Exception as e:
+        logger.error(f"음성 채팅 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"음성 채팅 실패: {str(e)}")
+
+@router.post("/speech/full-voice-chat")
+async def full_voice_chat(
+    audio_file: UploadFile = File(...),
+    model_key: str = None,
+    voice_language: str = "ko",
+    voice_slow: bool = False,
+    prefer_whisper: bool = True
+):
+    """완전 음성 채팅: 음성 입력 → 텍스트 → LLM 응답 → 음성 출력"""
+    try:
+        speech_service = get_speech_service()
+
+        # 1. 음성을 텍스트로 변환
+        import tempfile
+        temp_audio_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        content = await audio_file.read()
+        temp_audio_file.write(content)
+        temp_audio_file.close()
+
+        stt_result = speech_service.speech_to_text(temp_audio_file.name, prefer_whisper)
+        speech_service.cleanup_temp_file(temp_audio_file.name)
+
+        if not stt_result["success"]:
+            return {
+                "error": f"음성 인식 실패: {stt_result['error']}",
+                "stage": "speech_to_text"
+            }
+
+        user_text = stt_result["text"]
+
+        # 2. LLM으로 응답 생성
+        llm = get_llm_handler(model_key)
+        response_text = llm.chat_generate(user_text, stream=False)
+
+        # 3. 응답을 음성으로 변환
+        tts_result = speech_service.text_to_speech(
+            text=response_text,
+            language=voice_language,
+            slow=voice_slow
+        )
+
+        if tts_result["success"]:
+            from fastapi.responses import FileResponse
+            return FileResponse(
+                tts_result["audio_file"],
+                media_type="audio/mpeg",
+                filename="full_chat_response.mp3",
+                headers={
+                    "Content-Disposition": "attachment; filename=full_chat_response.mp3",
+                    "X-User-Text": user_text,
+                    "X-Response-Text": response_text,
+                    "X-STT-Method": stt_result.get("method", "unknown"),
+                    "X-STT-Confidence": str(stt_result.get("confidence", 0.0)),
+                    "X-Duration-Estimate": str(tts_result.get("duration_estimate", 0))
+                }
+            )
+        else:
+            # TTS 실패 시 텍스트 정보만 반환
+            return {
+                "user_text": user_text,
+                "response_text": response_text,
+                "stt_method": stt_result.get("method"),
+                "stt_confidence": stt_result.get("confidence"),
+                "audio_available": False,
+                "tts_error": tts_result["error"]
+            }
+
+    except Exception as e:
+        logger.error(f"완전 음성 채팅 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"완전 음성 채팅 실패: {str(e)}")
+
+@router.get("/speech/languages")
+async def get_supported_languages():
+    """지원되는 언어 목록을 반환합니다"""
+    try:
+        service = get_speech_service()
+        languages = service.get_supported_languages()
+
+        return {
+            "supported_languages": languages,
+            "default_language": "ko",
+            "total_languages": len(languages)
+        }
+
+    except Exception as e:
+        logger.error(f"지원 언어 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"지원 언어 조회 실패: {str(e)}")
+
+@router.get("/speech/status")
+async def get_speech_service_status():
+    """음성 서비스 상태를 확인합니다"""
+    try:
+        service = get_speech_service()
+
+        return {
+            "whisper_available": service.whisper_model is not None,
+            "google_stt_available": True,  # SpeechRecognition은 항상 사용 가능
+            "gtts_available": True,  # gTTS는 항상 사용 가능
+            "microphone_available": service.microphone is not None,
+            "supported_languages": len(service.get_supported_languages()),
+            "status": "ready"
+        }
+
+    except Exception as e:
+        logger.error(f"음성 서비스 상태 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"음성 서비스 상태 조회 실패: {str(e)}")
+
+# === 실시간 스트리밍 TTS API 엔드포인트들 ===
+
+@router.post("/speech/streaming-generate-with-voice")
+async def streaming_generate_with_voice(request: StreamingTTSRequest):
+    """텍스트를 스트리밍 생성하면서 실시간으로 음성 읽기"""
+    try:
+        llm = get_llm_handler(request.model_key)
+        streaming_tts = get_streaming_tts_service()
+
+        async def generate_stream():
+            # 버퍼 초기화
+            streaming_tts.reset_buffer()
+
+            try:
+                for chunk in streaming_tts.generate_with_realtime_speech(
+                    llm_handler=llm,
+                    prompt=request.prompt,
+                    model_key=request.model_key,
+                    voice_language=request.voice_language,
+                    voice_slow=request.voice_slow,
+                    read_partial=request.read_partial
+                ):
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+            except Exception as e:
+                logger.error(f"스트리밍 TTS 생성 오류: {e}")
+                error_chunk = {
+                    "type": "error",
+                    "error": str(e)
+                }
+                yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"스트리밍 TTS 초기화 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"스트리밍 TTS 실패: {str(e)}")
+
+@router.post("/speech/sentences-to-speech")
+async def sentences_to_speech(request: SentencesTTSRequest):
+    """여러 문장을 한번에 음성으로 변환"""
+    try:
+        sentence_tts = get_sentence_tts_service()
+
+        results = await sentence_tts.convert_sentences_to_speech(
+            sentences=request.sentences,
+            language=request.language,
+            slow=request.slow
+        )
+
+        # 성공한 음성 파일들의 URL 생성
+        successful_results = []
+        failed_results = []
+
+        for result in results:
+            if result["success"]:
+                successful_results.append({
+                    "sentence_index": result["sentence_index"],
+                    "sentence_text": result["sentence_text"],
+                    "audio_file": result["audio_file"],
+                    "success": True
+                })
+            else:
+                failed_results.append({
+                    "sentence_index": result["sentence_index"],
+                    "sentence_text": result["sentence_text"],
+                    "error": result["error"],
+                    "success": False
+                })
+
+        return {
+            "total_sentences": len(request.sentences),
+            "successful_conversions": len(successful_results),
+            "failed_conversions": len(failed_results),
+            "results": successful_results,
+            "errors": failed_results,
+            "language": request.language,
+            "slow": request.slow
+        }
+
+    except Exception as e:
+        logger.error(f"문장 TTS 변환 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"문장 TTS 변환 실패: {str(e)}")
+
+@router.post("/speech/text-to-sentences-and-speech")
+async def text_to_sentences_and_speech(request: TextToSpeechRequest):
+    """텍스트를 문장으로 분할하고 각각 음성으로 변환"""
+    try:
+        sentence_tts = get_sentence_tts_service()
+
+        # 텍스트를 문장으로 분할
+        sentences = sentence_tts.split_text_into_sentences(request.text)
+
+        # 각 문장을 음성으로 변환
+        results = await sentence_tts.convert_sentences_to_speech(
+            sentences=sentences,
+            language=request.language,
+            slow=request.slow
+        )
+
+        # 결과 정리
+        audio_files = []
+        sentence_info = []
+
+        for result in results:
+            sentence_info.append({
+                "index": result["sentence_index"],
+                "text": result["sentence_text"],
+                "success": result["success"]
+            })
+
+            if result["success"]:
+                audio_files.append(result["audio_file"])
+
+        return {
+            "original_text": request.text,
+            "total_sentences": len(sentences),
+            "successful_conversions": len(audio_files),
+            "sentences": sentence_info,
+            "audio_files": audio_files,
+            "language": request.language
+        }
+
+    except Exception as e:
+        logger.error(f"텍스트 분할 TTS 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"텍스트 분할 TTS 실패: {str(e)}")
+
+@router.get("/speech/streaming-tts/status")
+async def get_streaming_tts_status():
+    """스트리밍 TTS 서비스 상태 확인"""
+    try:
+        # 서비스들 초기화 확인
+        speech_service = get_speech_service()
+        streaming_tts = get_streaming_tts_service()
+        sentence_tts = get_sentence_tts_service()
+
+        return {
+            "streaming_tts_available": streaming_tts is not None,
+            "sentence_tts_available": sentence_tts is not None,
+            "speech_service_available": speech_service is not None,
+            "whisper_available": speech_service.whisper_model is not None,
+            "gtts_available": True,
+            "supported_features": [
+                "실시간 스트리밍 TTS",
+                "문장 단위 TTS",
+                "텍스트 분할 TTS",
+                "부분 문장 읽기"
+            ],
+            "supported_languages": speech_service.get_supported_languages(),
+            "status": "ready"
+        }
+
+    except Exception as e:
+        logger.error(f"스트리밍 TTS 상태 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"스트리밍 TTS 상태 조회 실패: {str(e)}")

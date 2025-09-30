@@ -39,3 +39,10 @@ aiomysql
 aiosqlite
 sqlalchemy[asyncio]
 pandas
+
+# 음성 처리 (Speech-to-Text, Text-to-Speech)
+openai-whisper
+speechrecognition
+gtts
+pydub
+# pyaudio  # 시스템 의존성 필요 - 별도 설치 필요

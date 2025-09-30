@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎯 실시간 스트리밍 음성 - LLM 서버</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .main-content {
+            padding: 30px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .prompt-input {
+            flex: 1;
+            min-width: 300px;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 15px;
+            font-size: 1em;
+            outline: none;
+            transition: border-color 0.3s ease;
+            resize: vertical;
+        }
+
+        .prompt-input:focus {
+            border-color: #667eea;
+        }
+
+        .start-btn {
+            background: linear-gradient(135deg, #27ae60, #2ecc71);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 15px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .start-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(39, 174, 96, 0.3);
+        }
+
+        .start-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .settings {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+        }
+
+        .settings h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .setting-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .setting-label {
+            min-width: 120px;
+            font-weight: bold;
+        }
+
+        select, input[type="checkbox"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        .status-panel {
+            background: #f0f4f8;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 0 10px 10px 0;
+        }
+
+        .text-output {
+            background: #f8f9fa;
+            border: 1px solid #e0e0e0;
+            border-radius: 15px;
+            padding: 20px;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            font-family: 'Georgia', serif;
+            font-size: 1.1em;
+            line-height: 1.6;
+        }
+
+        .audio-queue {
+            background: #f0f8ff;
+            border: 1px solid #d0e7ff;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .audio-queue h3 {
+            margin-bottom: 15px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .audio-item {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .audio-item.playing {
+            border-color: #27ae60;
+            background: #f0fff4;
+        }
+
+        .audio-item.completed {
+            opacity: 0.7;
+            background: #f5f5f5;
+        }
+
+        .sentence-text {
+            flex: 1;
+            margin-right: 15px;
+            font-style: italic;
+        }
+
+        .audio-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .play-btn {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+
+        .play-btn:hover {
+            background: #2ecc71;
+        }
+
+        .play-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .audio-player {
+            display: none;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #667eea;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .progress-bar {
+            background: #e0e0e0;
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            height: 100%;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .auto-play-control {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .auto-play-toggle {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .auto-play-toggle.active {
+            background: #27ae60;
+        }
+
+        @media (max-width: 768px) {
+            .controls {
+                flex-direction: column;
+            }
+
+            .prompt-input {
+                min-width: 100%;
+            }
+
+            .setting-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 실시간 스트리밍 음성</h1>
+            <p>AI가 텍스트를 생성하는 동시에 완성된 문장을 바로 읽어줍니다</p>
+        </div>
+
+        <div class="main-content">
+            <!-- 설정 패널 -->
+            <div class="settings">
+                <h3>⚙️ 설정</h3>
+                <div class="setting-row">
+                    <span class="setting-label">모델:</span>
+                    <select id="modelSelect">
+                        <option value="">기본 모델</option>
+                        <option value="qwen2.5-7b">Qwen 2.5 7B</option>
+                        <option value="llama3.1-8b">Llama 3.1 8B</option>
+                        <option value="gemma-3-4b">Gemma 3 4B</option>
+                    </select>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">음성 언어:</span>
+                    <select id="voiceLanguage">
+                        <option value="ko">한국어</option>
+                        <option value="en">English</option>
+                        <option value="ja">日本語</option>
+                        <option value="zh">中文</option>
+                    </select>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">느린 음성:</span>
+                    <input type="checkbox" id="voiceSlow">
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">부분 문장 읽기:</span>
+                    <input type="checkbox" id="readPartial" checked>
+                </div>
+            </div>
+
+            <!-- 자동 재생 제어 -->
+            <div class="auto-play-control">
+                <span>🔊 자동 음성 재생</span>
+                <button id="autoPlayToggle" class="auto-play-toggle active">활성화</button>
+            </div>
+
+            <!-- 상태 표시 -->
+            <div id="statusPanel" class="status-panel" style="display: none;">
+                <div id="statusText">준비 중...</div>
+                <div class="progress-bar">
+                    <div id="progressFill" class="progress-fill"></div>
+                </div>
+            </div>
+
+            <!-- 입력 컨트롤 -->
+            <div class="controls">
+                <textarea id="promptInput" class="prompt-input" rows="3" placeholder="AI에게 질문하거나 요청하세요...&#10;예: 인공지능의 미래에 대해 설명해주세요."></textarea>
+                <button id="startBtn" class="start-btn">🚀 시작</button>
+            </div>
+
+            <!-- 생성된 텍스트 -->
+            <div id="textOutput" class="text-output">
+                <div style="color: #888; text-align: center; margin-top: 80px;">
+                    생성된 텍스트가 여기에 실시간으로 표시됩니다...
+                </div>
+            </div>
+
+            <!-- 음성 대기열 -->
+            <div class="audio-queue">
+                <h3>🎵 음성 대기열</h3>
+                <div id="audioQueue">
+                    <div style="color: #888; text-align: center; padding: 20px;">
+                        음성이 생성되면 여기에 표시됩니다...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class StreamingVoiceApp {
+            constructor() {
+                this.apiUrl = '/api/v1';
+                this.isStreaming = false;
+                this.autoPlay = true;
+                this.audioQueue = [];
+                this.currentlyPlaying = null;
+
+                this.initElements();
+                this.bindEvents();
+            }
+
+            initElements() {
+                this.promptInput = document.getElementById('promptInput');
+                this.startBtn = document.getElementById('startBtn');
+                this.statusPanel = document.getElementById('statusPanel');
+                this.statusText = document.getElementById('statusText');
+                this.progressFill = document.getElementById('progressFill');
+                this.textOutput = document.getElementById('textOutput');
+                this.audioQueueDiv = document.getElementById('audioQueue');
+                this.autoPlayToggle = document.getElementById('autoPlayToggle');
+
+                // 설정 요소들
+                this.modelSelect = document.getElementById('modelSelect');
+                this.voiceLanguage = document.getElementById('voiceLanguage');
+                this.voiceSlow = document.getElementById('voiceSlow');
+                this.readPartial = document.getElementById('readPartial');
+            }
+
+            bindEvents() {
+                this.startBtn.addEventListener('click', () => this.startStreaming());
+                this.autoPlayToggle.addEventListener('click', () => this.toggleAutoPlay());
+                this.promptInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.startStreaming();
+                    }
+                });
+            }
+
+            toggleAutoPlay() {
+                this.autoPlay = !this.autoPlay;
+                this.autoPlayToggle.textContent = this.autoPlay ? '활성화' : '비활성화';
+                this.autoPlayToggle.className = `auto-play-toggle ${this.autoPlay ? 'active' : ''}`;
+            }
+
+            async startStreaming() {
+                const prompt = this.promptInput.value.trim();
+                if (!prompt) {
+                    alert('프롬프트를 입력해주세요.');
+                    return;
+                }
+
+                if (this.isStreaming) {
+                    return;
+                }
+
+                this.isStreaming = true;
+                this.startBtn.disabled = true;
+                this.startBtn.textContent = '🔄 생성 중...';
+
+                // 초기화
+                this.textOutput.innerHTML = '';
+                this.audioQueueDiv.innerHTML = '';
+                this.audioQueue = [];
+                this.currentlyPlaying = null;
+
+                this.showStatus('🚀 스트리밍 시작...', 0);
+
+                try {
+                    const response = await fetch(`${this.apiUrl}/speech/streaming-generate-with-voice`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            prompt: prompt,
+                            model_key: this.modelSelect.value || null,
+                            voice_language: this.voiceLanguage.value,
+                            voice_slow: this.voiceSlow.checked,
+                            read_partial: this.readPartial.checked
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+
+                    await this.processStreamingResponse(response);
+
+                } catch (error) {
+                    console.error('스트리밍 오류:', error);
+                    this.showStatus(`❌ 오류: ${error.message}`, 0);
+                } finally {
+                    this.isStreaming = false;
+                    this.startBtn.disabled = false;
+                    this.startBtn.textContent = '🚀 시작';
+                }
+            }
+
+            async processStreamingResponse(response) {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                try {
+                    while (true) {
+                        const { done, value } = await reader.read();
+
+                        if (done) break;
+
+                        const chunk = decoder.decode(value, { stream: true });
+                        const lines = chunk.split('\n');
+
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const data = JSON.parse(line.substring(6));
+                                    await this.handleStreamData(data);
+                                } catch (e) {
+                                    console.warn('JSON 파싱 오류:', e);
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    reader.releaseLock();
+                }
+            }
+
+            async handleStreamData(data) {
+                switch (data.type) {
+                    case 'status':
+                        this.showStatus(`🔄 ${data.message}`, data.progress || 0);
+                        break;
+
+                    case 'text_chunk':
+                        this.appendText(data.content);
+                        break;
+
+                    case 'sentence_audio':
+                        await this.addSentenceAudio(data);
+                        break;
+
+                    case 'partial_audio':
+                        await this.addPartialAudio(data);
+                        break;
+
+                    case 'completed':
+                        this.showStatus('✅ 완료!', 100);
+                        setTimeout(() => this.hideStatus(), 3000);
+                        break;
+
+                    case 'error':
+                        this.showStatus(`❌ 오류: ${data.error}`, 0);
+                        break;
+                }
+            }
+
+            appendText(text) {
+                this.textOutput.innerHTML += text;
+                this.textOutput.scrollTop = this.textOutput.scrollHeight;
+            }
+
+            async addSentenceAudio(data) {
+                if (!data.audio_ready) {
+                    console.warn('음성 생성 실패:', data.audio_error);
+                    return;
+                }
+
+                const audioItem = {
+                    id: `sentence_${data.sentence_number}`,
+                    type: 'sentence',
+                    text: data.sentence_text,
+                    audioFile: data.audio_file,
+                    played: false
+                };
+
+                this.audioQueue.push(audioItem);
+                this.renderAudioQueue();
+
+                if (this.autoPlay && !this.currentlyPlaying) {
+                    await this.playNextAudio();
+                }
+            }
+
+            async addPartialAudio(data) {
+                if (!data.audio_ready) return;
+
+                const audioItem = {
+                    id: `partial_${Date.now()}`,
+                    type: 'partial',
+                    text: data.partial_text,
+                    audioFile: data.audio_file,
+                    played: false
+                };
+
+                this.audioQueue.push(audioItem);
+                this.renderAudioQueue();
+
+                if (this.autoPlay && !this.currentlyPlaying) {
+                    await this.playNextAudio();
+                }
+            }
+
+            renderAudioQueue() {
+                this.audioQueueDiv.innerHTML = '';
+
+                this.audioQueue.forEach((item, index) => {
+                    const div = document.createElement('div');
+                    div.className = `audio-item ${item.played ? 'completed' : ''} ${this.currentlyPlaying === item.id ? 'playing' : ''}`;
+
+                    div.innerHTML = `
+                        <div class="sentence-text">${item.text}</div>
+                        <div class="audio-controls">
+                            <button class="play-btn" onclick="app.playAudio('${item.id}')" ${item.played ? 'disabled' : ''}>
+                                ${this.currentlyPlaying === item.id ? '▶️ 재생 중' : item.played ? '✅ 완료' : '▶️ 재생'}
+                            </button>
+                            <audio class="audio-player" preload="none">
+                                <source src="${item.audioFile}" type="audio/mpeg">
+                            </audio>
+                        </div>
+                    `;
+
+                    this.audioQueueDiv.appendChild(div);
+                });
+            }
+
+            async playAudio(itemId) {
+                const item = this.audioQueue.find(a => a.id === itemId);
+                if (!item || item.played) return;
+
+                this.currentlyPlaying = itemId;
+                this.renderAudioQueue();
+
+                try {
+                    const audioElement = document.querySelector(`[class*="${itemId}"] audio`);
+                    if (audioElement) {
+                        audioElement.src = item.audioFile;
+                        await audioElement.play();
+
+                        audioElement.onended = () => {
+                            item.played = true;
+                            this.currentlyPlaying = null;
+                            this.renderAudioQueue();
+
+                            if (this.autoPlay) {
+                                setTimeout(() => this.playNextAudio(), 500);
+                            }
+                        };
+                    }
+                } catch (error) {
+                    console.error('음성 재생 오류:', error);
+                    this.currentlyPlaying = null;
+                    this.renderAudioQueue();
+                }
+            }
+
+            async playNextAudio() {
+                const nextItem = this.audioQueue.find(item => !item.played);
+                if (nextItem) {
+                    await this.playAudio(nextItem.id);
+                }
+            }
+
+            showStatus(message, progress) {
+                this.statusPanel.style.display = 'block';
+                this.statusText.textContent = message;
+                this.progressFill.style.width = `${progress}%`;
+            }
+
+            hideStatus() {
+                this.statusPanel.style.display = 'none';
+            }
+        }
+
+        // 앱 시작
+        const app = new StreamingVoiceApp();
+    </script>
+</body>
+</html>

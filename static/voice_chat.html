@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎤 음성 채팅 - LLM 서버</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .chat-container {
+            padding: 30px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .record-btn {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .record-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(255, 107, 107, 0.3);
+        }
+
+        .record-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .record-btn.recording {
+            background: linear-gradient(135deg, #27ae60, #2ecc71);
+            animation: pulse 1.5s ease-in-out infinite alternate;
+        }
+
+        @keyframes pulse {
+            from { transform: scale(1); }
+            to { transform: scale(1.05); }
+        }
+
+        .text-input {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 25px;
+            font-size: 1em;
+            outline: none;
+            transition: border-color 0.3s ease;
+        }
+
+        .text-input:focus {
+            border-color: #667eea;
+        }
+
+        .send-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 25px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .send-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .send-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .status.error {
+            border-left-color: #ff6b6b;
+            background: #fff5f5;
+        }
+
+        .status.success {
+            border-left-color: #27ae60;
+            background: #f0fff4;
+        }
+
+        .chat-history {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 15px;
+            position: relative;
+        }
+
+        .message.user {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            margin-left: 20%;
+        }
+
+        .message.bot {
+            background: #f8f9fa;
+            margin-right: 20%;
+            border: 1px solid #e0e0e0;
+        }
+
+        .message-header {
+            font-weight: bold;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .message-time {
+            font-size: 0.8em;
+            opacity: 0.7;
+        }
+
+        .audio-player {
+            margin-top: 10px;
+        }
+
+        .audio-player audio {
+            width: 100%;
+            border-radius: 10px;
+        }
+
+        .settings {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+        }
+
+        .settings h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .setting-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .setting-label {
+            min-width: 100px;
+            font-weight: bold;
+        }
+
+        select, input[type="checkbox"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #667eea;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            color: #ff6b6b;
+            font-weight: bold;
+        }
+
+        @media (max-width: 768px) {
+            .controls {
+                flex-direction: column;
+            }
+
+            .text-input {
+                width: 100%;
+            }
+
+            .message.user {
+                margin-left: 0;
+            }
+
+            .message.bot {
+                margin-right: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎤 음성 채팅</h1>
+            <p>음성으로 대화하고 AI 답변을 들어보세요</p>
+        </div>
+
+        <div class="chat-container">
+            <!-- 설정 패널 -->
+            <div class="settings">
+                <h3>⚙️ 설정</h3>
+                <div class="setting-row">
+                    <span class="setting-label">모델:</span>
+                    <select id="modelSelect">
+                        <option value="">기본 모델</option>
+                        <option value="qwen2.5-7b">Qwen 2.5 7B</option>
+                        <option value="llama3.1-8b">Llama 3.1 8B</option>
+                        <option value="gemma-3-4b">Gemma 3 4B</option>
+                    </select>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">음성 언어:</span>
+                    <select id="voiceLanguage">
+                        <option value="ko">한국어</option>
+                        <option value="en">English</option>
+                        <option value="ja">日本語</option>
+                        <option value="zh">中文</option>
+                    </select>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">느린 음성:</span>
+                    <input type="checkbox" id="voiceSlow">
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Whisper 우선:</span>
+                    <input type="checkbox" id="preferWhisper" checked>
+                </div>
+            </div>
+
+            <!-- 상태 표시 -->
+            <div id="status" class="status" style="display: none;"></div>
+
+            <!-- 대화 히스토리 -->
+            <div id="chatHistory" class="chat-history"></div>
+
+            <!-- 입력 컨트롤 -->
+            <div class="controls">
+                <button id="recordBtn" class="record-btn">
+                    🎤 음성 녹음 시작
+                </button>
+                <input type="text" id="textInput" class="text-input" placeholder="또는 텍스트로 입력하세요...">
+                <button id="sendBtn" class="send-btn">📝 텍스트 전송</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class VoiceChat {
+            constructor() {
+                this.apiUrl = '/api/v1';
+                this.isRecording = false;
+                this.mediaRecorder = null;
+                this.audioChunks = [];
+
+                this.initElements();
+                this.bindEvents();
+                this.checkMicrophonePermission();
+            }
+
+            initElements() {
+                this.recordBtn = document.getElementById('recordBtn');
+                this.textInput = document.getElementById('textInput');
+                this.sendBtn = document.getElementById('sendBtn');
+                this.status = document.getElementById('status');
+                this.chatHistory = document.getElementById('chatHistory');
+                this.modelSelect = document.getElementById('modelSelect');
+                this.voiceLanguage = document.getElementById('voiceLanguage');
+                this.voiceSlow = document.getElementById('voiceSlow');
+                this.preferWhisper = document.getElementById('preferWhisper');
+            }
+
+            bindEvents() {
+                this.recordBtn.addEventListener('click', () => this.toggleRecording());
+                this.sendBtn.addEventListener('click', () => this.sendTextMessage());
+                this.textInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') this.sendTextMessage();
+                });
+            }
+
+            async checkMicrophonePermission() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    stream.getTracks().forEach(track => track.stop());
+                    this.showStatus('🎤 마이크 접근 권한이 있습니다.', 'success');
+                } catch (error) {
+                    this.showStatus('❌ 마이크 접근 권한이 필요합니다.', 'error');
+                    this.recordBtn.disabled = true;
+                }
+            }
+
+            showStatus(message, type = 'info') {
+                this.status.textContent = message;
+                this.status.className = `status ${type}`;
+                this.status.style.display = 'block';
+
+                if (type !== 'error') {
+                    setTimeout(() => {
+                        this.status.style.display = 'none';
+                    }, 3000);
+                }
+            }
+
+            addMessage(content, isUser = false, audioUrl = null) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
+
+                const time = new Date().toLocaleTimeString();
+                const header = isUser ? '👤 사용자' : '🤖 AI 어시스턴트';
+
+                let audioHtml = '';
+                if (audioUrl) {
+                    audioHtml = `
+                        <div class="audio-player">
+                            <audio controls>
+                                <source src="${audioUrl}" type="audio/mpeg">
+                                브라우저에서 오디오를 지원하지 않습니다.
+                            </audio>
+                        </div>
+                    `;
+                }
+
+                messageDiv.innerHTML = `
+                    <div class="message-header">
+                        <span>${header}</span>
+                        <span class="message-time">${time}</span>
+                    </div>
+                    <div>${content}</div>
+                    ${audioHtml}
+                `;
+
+                this.chatHistory.appendChild(messageDiv);
+                this.chatHistory.scrollTop = this.chatHistory.scrollHeight;
+            }
+
+            async toggleRecording() {
+                if (!this.isRecording) {
+                    await this.startRecording();
+                } else {
+                    await this.stopRecording();
+                }
+            }
+
+            async startRecording() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    this.mediaRecorder = new MediaRecorder(stream);
+                    this.audioChunks = [];
+
+                    this.mediaRecorder.ondataavailable = (event) => {
+                        this.audioChunks.push(event.data);
+                    };
+
+                    this.mediaRecorder.onstop = () => {
+                        this.processRecording();
+                    };
+
+                    this.mediaRecorder.start();
+                    this.isRecording = true;
+                    this.recordBtn.textContent = '🔴 녹음 중... (클릭하여 정지)';
+                    this.recordBtn.className = 'record-btn recording';
+                    this.showStatus('🎤 녹음 중입니다...', 'info');
+
+                } catch (error) {
+                    this.showStatus('❌ 녹음 시작 실패: ' + error.message, 'error');
+                }
+            }
+
+            async stopRecording() {
+                if (this.mediaRecorder && this.isRecording) {
+                    this.mediaRecorder.stop();
+                    this.isRecording = false;
+                    this.recordBtn.textContent = '🎤 음성 녹음 시작';
+                    this.recordBtn.className = 'record-btn';
+                    this.recordBtn.disabled = true;
+                    this.showStatus('🔄 음성을 처리하는 중...', 'info');
+                }
+            }
+
+            async processRecording() {
+                const audioBlob = new Blob(this.audioChunks, { type: 'audio/wav' });
+                await this.sendVoiceMessage(audioBlob);
+                this.recordBtn.disabled = false;
+            }
+
+            async sendVoiceMessage(audioBlob) {
+                const formData = new FormData();
+                formData.append('audio_file', audioBlob, 'recording.wav');
+                formData.append('model_key', this.modelSelect.value);
+                formData.append('voice_language', this.voiceLanguage.value);
+                formData.append('voice_slow', this.voiceSlow.checked);
+                formData.append('prefer_whisper', this.preferWhisper.checked);
+
+                try {
+                    this.showStatus('🔄 완전 음성 채팅 처리 중...', 'info');
+
+                    const response = await fetch(`${this.apiUrl}/speech/full-voice-chat`, {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (response.ok) {
+                        const userText = response.headers.get('X-User-Text');
+                        const responseText = response.headers.get('X-Response-Text');
+                        const sttMethod = response.headers.get('X-STT-Method');
+                        const sttConfidence = response.headers.get('X-STT-Confidence');
+
+                        // 사용자 메시지 추가
+                        this.addMessage(`${userText} <br><small>(음성인식: ${sttMethod}, 신뢰도: ${sttConfidence})</small>`, true);
+
+                        // AI 응답을 오디오로 받음
+                        const audioUrl = URL.createObjectURL(await response.blob());
+                        this.addMessage(responseText, false, audioUrl);
+
+                        this.showStatus('✅ 음성 채팅 완료!', 'success');
+                    } else {
+                        const errorData = await response.json();
+                        this.showStatus(`❌ 오류: ${errorData.detail}`, 'error');
+                    }
+                } catch (error) {
+                    this.showStatus(`❌ 네트워크 오류: ${error.message}`, 'error');
+                }
+            }
+
+            async sendTextMessage() {
+                const text = this.textInput.value.trim();
+                if (!text) return;
+
+                try {
+                    this.sendBtn.disabled = true;
+                    this.showStatus('🤖 AI가 응답을 생성하는 중...', 'info');
+
+                    // 사용자 메시지 추가
+                    this.addMessage(text, true);
+                    this.textInput.value = '';
+
+                    const response = await fetch(`${this.apiUrl}/speech/voice-chat`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            text: text,
+                            model_key: this.modelSelect.value,
+                            voice_language: this.voiceLanguage.value,
+                            voice_slow: this.voiceSlow.checked
+                        })
+                    });
+
+                    if (response.ok) {
+                        const responseText = response.headers.get('X-Response-Text');
+
+                        // AI 응답을 오디오로 받음
+                        const audioUrl = URL.createObjectURL(await response.blob());
+                        this.addMessage(responseText, false, audioUrl);
+
+                        this.showStatus('✅ 응답 완료!', 'success');
+                    } else {
+                        const errorData = await response.json();
+                        this.showStatus(`❌ 오류: ${errorData.detail}`, 'error');
+                    }
+                } catch (error) {
+                    this.showStatus(`❌ 네트워크 오류: ${error.message}`, 'error');
+                } finally {
+                    this.sendBtn.disabled = false;
+                }
+            }
+        }
+
+        // 앱 시작
+        document.addEventListener('DOMContentLoaded', () => {
+            new VoiceChat();
+        });
+    </script>
+</body>
+</html>

@@ -82,7 +82,9 @@ def read_root():
             },
             "UI 인터페이스": {
                 "gradio_ui": "/ui",
-                "streaming_ui": "/stream"
+                "streaming_ui": "/stream",
+                "voice_chat": "/voice",
+                "streaming_voice": "/streaming-voice"
             },
             "모델 관리": {
                 "models": "/api/v1/models",
@@ -116,6 +118,20 @@ def read_root():
                 "db_query": "/api/v1/internal-db/query",
                 "db_status": "/api/v1/internal-db/status"
             },
+            "음성 기능 (NEW!)": {
+                "text_to_speech": "/api/v1/speech/text-to-speech",
+                "speech_to_text": "/api/v1/speech/speech-to-text",
+                "voice_chat": "/api/v1/speech/voice-chat",
+                "full_voice_chat": "/api/v1/speech/full-voice-chat",
+                "speech_languages": "/api/v1/speech/languages",
+                "speech_status": "/api/v1/speech/status"
+            },
+            "실시간 스트리밍 TTS (NEW!)": {
+                "streaming_generate_with_voice": "/api/v1/speech/streaming-generate-with-voice",
+                "sentences_to_speech": "/api/v1/speech/sentences-to-speech",
+                "text_to_sentences_and_speech": "/api/v1/speech/text-to-sentences-and-speech",
+                "streaming_tts_status": "/api/v1/speech/streaming-tts/status"
+            },
             "문서": {
                 "docs": "/docs",
                 "redoc": "/redoc"
@@ -146,6 +162,24 @@ async def streaming_page():
         return FileResponse(streaming_file)
     else:
         return {"error": "Streaming page not found"}
+
+# 음성 채팅 페이지 라우트
+@app.get("/voice")
+async def voice_chat_page():
+    voice_file = os.path.join(static_path, "voice_chat.html")
+    if os.path.exists(voice_file):
+        return FileResponse(voice_file)
+    else:
+        return {"error": "Voice chat page not found"}
+
+# 실시간 스트리밍 음성 페이지 라우트
+@app.get("/streaming-voice")
+async def streaming_voice_page():
+    streaming_voice_file = os.path.join(static_path, "streaming_voice.html")
+    if os.path.exists(streaming_voice_file):
+        return FileResponse(streaming_voice_file)
+    else:
+        return {"error": "Streaming voice page not found"}
 
 # Gradio UI를 FastAPI 앱에 마운트
 app = gr.mount_gradio_app(app, gradio_ui, path="/ui")
