@@ -252,6 +252,138 @@
             font-weight: bold;
         }
 
+        .price-btn {
+            background: linear-gradient(135deg, #f39c12, #e67e22);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .price-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(243, 156, 18, 0.3);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateY(-50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .modal-header h2 {
+            color: #333;
+        }
+
+        .close-btn {
+            font-size: 28px;
+            font-weight: bold;
+            color: #aaa;
+            cursor: pointer;
+            border: none;
+            background: none;
+            transition: color 0.3s;
+        }
+
+        .close-btn:hover {
+            color: #000;
+        }
+
+        .category-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .category-btn {
+            padding: 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 15px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+            font-size: 1.1em;
+        }
+
+        .category-btn:hover {
+            border-color: #667eea;
+            background: #f8f9fa;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .product-list {
+            display: none;
+        }
+
+        .product-item {
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .product-item:hover {
+            background: #f8f9fa;
+            border-color: #667eea;
+            transform: translateX(5px);
+        }
+
+        .product-item strong {
+            color: #333;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .product-item small {
+            color: #666;
+        }
+
         @media (max-width: 768px) {
             .controls {
                 flex-direction: column;
@@ -267,6 +399,10 @@
 
             .message.bot {
                 margin-right: 0;
+            }
+
+            .category-grid {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
             }
         }
     </style>
@@ -321,8 +457,30 @@
                 <button id="recordBtn" class="record-btn">
                     🎤 음성 녹음 시작
                 </button>
+                <button id="priceBtn" class="price-btn">
+                    💰 가격 조회
+                </button>
                 <input type="text" id="textInput" class="text-input" placeholder="또는 텍스트로 입력하세요...">
                 <button id="sendBtn" class="send-btn">📝 텍스트 전송</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 가격 조회 모달 -->
+    <div id="priceModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>💰 식료품 가격 조회</h2>
+                <button class="close-btn" id="closeModal">&times;</button>
+            </div>
+            <div id="categoryView">
+                <h3>카테고리를 선택하세요:</h3>
+                <div class="category-grid" id="categoryGrid"></div>
+            </div>
+            <div id="productView" class="product-list">
+                <button onclick="document.getElementById('productView').style.display='none'; document.getElementById('categoryView').style.display='block';" style="margin-bottom: 15px; padding: 10px 20px; border: none; background: #e0e0e0; border-radius: 10px; cursor: pointer;">← 카테고리로 돌아가기</button>
+                <h3 id="productViewTitle"></h3>
+                <div id="productList"></div>
             </div>
         </div>
     </div>
@@ -334,30 +492,123 @@
                 this.isRecording = false;
                 this.mediaRecorder = null;
                 this.audioChunks = [];
+                this.groceryData = null;
 
                 this.initElements();
                 this.bindEvents();
                 this.checkMicrophonePermission();
+                this.loadGroceryData();
             }
 
             initElements() {
                 this.recordBtn = document.getElementById('recordBtn');
                 this.textInput = document.getElementById('textInput');
                 this.sendBtn = document.getElementById('sendBtn');
+                this.priceBtn = document.getElementById('priceBtn');
                 this.status = document.getElementById('status');
                 this.chatHistory = document.getElementById('chatHistory');
                 this.modelSelect = document.getElementById('modelSelect');
                 this.voiceLanguage = document.getElementById('voiceLanguage');
                 this.voiceSlow = document.getElementById('voiceSlow');
                 this.preferWhisper = document.getElementById('preferWhisper');
+                this.priceModal = document.getElementById('priceModal');
+                this.closeModal = document.getElementById('closeModal');
+                this.categoryGrid = document.getElementById('categoryGrid');
+                this.productList = document.getElementById('productList');
             }
 
             bindEvents() {
                 this.recordBtn.addEventListener('click', () => this.toggleRecording());
                 this.sendBtn.addEventListener('click', () => this.sendTextMessage());
+                this.priceBtn.addEventListener('click', () => this.openPriceModal());
+                this.closeModal.addEventListener('click', () => this.closePriceModal());
                 this.textInput.addEventListener('keypress', (e) => {
                     if (e.key === 'Enter') this.sendTextMessage();
                 });
+
+                // 모달 외부 클릭 시 닫기
+                window.addEventListener('click', (e) => {
+                    if (e.target === this.priceModal) {
+                        this.closePriceModal();
+                    }
+                });
+            }
+
+            async loadGroceryData() {
+                try {
+                    const response = await fetch('/data/grocery_deals.json');
+                    if (response.ok) {
+                        this.groceryData = await response.json();
+                        this.renderCategories();
+                    }
+                } catch (error) {
+                    console.error('식료품 데이터 로드 실패:', error);
+                }
+            }
+
+            renderCategories() {
+                if (!this.groceryData) return;
+
+                const categories = [...new Set(this.groceryData.map(item => item.category))];
+                this.categoryGrid.innerHTML = categories.map(category => `
+                    <div class="category-btn" onclick="voiceChat.selectCategory('${category}')">
+                        ${this.getCategoryEmoji(category)} ${category}
+                    </div>
+                `).join('');
+            }
+
+            getCategoryEmoji(category) {
+                const emojiMap = {
+                    '과일': '🍎',
+                    '채소': '🥬',
+                    '육류': '🥩',
+                    '유제품': '🥛',
+                    '생활용품': '🧴',
+                    '곡물': '🌾',
+                    '간식': '🍪',
+                    '음료': '🥤',
+                    '수산물': '🐟',
+                    '양념': '🧂',
+                    '냉동식품': '🧊',
+                    '베이커리': '🍞',
+                    '계란': '🥚'
+                };
+                return emojiMap[category] || '🛒';
+            }
+
+            openPriceModal() {
+                this.priceModal.style.display = 'block';
+                document.getElementById('categoryView').style.display = 'block';
+                document.getElementById('productView').style.display = 'none';
+            }
+
+            closePriceModal() {
+                this.priceModal.style.display = 'none';
+            }
+
+            selectCategory(category) {
+                const products = this.groceryData.filter(item => item.category === category);
+
+                document.getElementById('productViewTitle').textContent = `${this.getCategoryEmoji(category)} ${category}`;
+                this.productList.innerHTML = products.map(product => {
+                    const minPrice = Math.min(...product.stores.map(s => s.price));
+                    const maxPrice = Math.max(...product.stores.map(s => s.price));
+                    return `
+                        <div class="product-item" onclick="voiceChat.selectProduct('${product.product}')">
+                            <strong>${product.product}</strong>
+                            <small>${product.unit} | ${minPrice.toLocaleString()}원 ~ ${maxPrice.toLocaleString()}원</small>
+                        </div>
+                    `;
+                }).join('');
+
+                document.getElementById('categoryView').style.display = 'none';
+                document.getElementById('productView').style.display = 'block';
+            }
+
+            selectProduct(productName) {
+                this.closePriceModal();
+                this.textInput.value = `${productName} 최저가 알려줘`;
+                this.sendTextMessage();
             }
 
             async checkMicrophonePermission() {

@@ -3,21 +3,34 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.config import settings
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from models.llm_handler import LLMHandler
 from models.embedding_handler import EmbeddingHandler
 from services.rag_service import RAGService
 from services.enhanced_internal_db_service import EnhancedInternalDBService
 from services.speech_service import SpeechService
 from services.streaming_tts_service import StreamingTTSService, SentenceBasedTTSService
+from services.news_service_rss import NewsServiceRSS
+from services.finance_service import FinanceService
+from services.db_llm_service import DBLLMService
+from services.grocery_rag_service import GroceryRAGService
+from models.news_models import NewsKeyword, NewsArticle, NewsResponse
+from models.finance import FinanceItem
+from utils.config_loader import config
+from tools.tool_executor import ToolExecutor
+from tools.tool_calling_wrapper import ToolCallingWrapper
 import logging
 import torch
 import json
 import asyncio
+import aiomysql
 from fastapi import UploadFile, File
+from datetime import datetime, timedelta
+import uuid
+import jwt
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,6 +58,12 @@ class RAGUpdateRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    model_key: str = None  # 사용할 모델 키
+    stream: bool = False  # 스트리밍 여부
+
+class ChatWithToolsRequest(BaseModel):
+    message: str
+    user_id: Optional[str] = None  # 사용자 ID (JWT에서 자동 추출, 직접 전달 시 무시됨)
     model_key: str = None  # 사용할 모델 키
     stream: bool = False  # 스트리밍 여부
 
@@ -119,6 +138,7 @@ class SpeechToTextRequest(BaseModel):
 
 class VoiceChatRequest(BaseModel):
     text: str = None  # 텍스트 입력 (음성 대신)
+    user_id: str = "default_user"  # 사용자 ID (tool calling용)
     model_key: str = None
     voice_language: str = "ko"
     voice_slow: bool = False
@@ -136,6 +156,25 @@ class SentencesTTSRequest(BaseModel):
     language: str = "ko"
     slow: bool = False
 
+# DB LLM 연동 요청 모델
+class ChatWithContextRequest(BaseModel):
+    message: str
+    user_id: str  # 사용자 ID
+    model_key: str = None
+    stream: bool = False
+
+# Health 관련 요청 모델
+class DiseaseRequest(BaseModel):
+    name: str
+    diagnosedDate: str = None
+    status: str = "Active"
+
+class MedicationRequest(BaseModel):
+    name: str
+    dosage: str = None
+    intakeTime: str = None
+    alarmEnabled: bool = True
+
 # Initialize handlers (lazy loading)
 llm_handler = None
 embedding_handler = None
@@ -144,6 +183,11 @@ internal_db_service = None
 speech_service = None
 streaming_tts_service = None
 sentence_tts_service = None
+news_service_rss = None
+finance_service = None
+db_llm_service = None
+tool_executor = None
+grocery_rag_service = None
 
 def get_llm_handler(model_key: str = None):
     global llm_handler
@@ -205,6 +249,53 @@ def get_sentence_tts_service():
         speech_svc = get_speech_service()
         sentence_tts_service = SentenceBasedTTSService(speech_svc)
     return sentence_tts_service
+
+def get_news_service_rss():
+    global news_service_rss
+    if news_service_rss is None:
+        logger.info("RSS 뉴스 서비스 초기화 중...")
+        news_service_rss = NewsServiceRSS()
+    return news_service_rss
+
+def get_finance_service():
+    global finance_service
+    if finance_service is None:
+        logger.info("재정 관리 서비스 초기화 중...")
+        finance_service = FinanceService()
+    return finance_service
+
+async def get_db_llm_service():
+    global db_llm_service
+    if db_llm_service is None:
+        logger.info("DB LLM 서비스 초기화 중...")
+        db_config = config.mariadb_config
+        db_llm_service = DBLLMService(db_config)
+        await db_llm_service.initialize()
+    return db_llm_service
+
+def get_grocery_rag_service():
+    """Grocery RAG 서비스 초기화"""
+    global grocery_rag_service
+    if grocery_rag_service is None:
+        logger.info("Grocery RAG 서비스 초기화 중...")
+        rag_svc = get_rag_service()
+        grocery_rag_service = GroceryRAGService(rag_svc)
+        # 식료품 데이터를 RAG에 로드
+        grocery_rag_service.initialize_grocery_rag()
+        logger.info("Grocery RAG 데이터 로드 완료")
+    return grocery_rag_service
+
+async def get_tool_executor():
+    """Tool Executor 초기화"""
+    global tool_executor
+    if tool_executor is None:
+        logger.info("Tool Executor 초기화 중...")
+        db_config = config.mariadb_config
+        # Grocery RAG 서비스 초기화
+        grocery_rag_svc = get_grocery_rag_service()
+        tool_executor = ToolExecutor(db_config, grocery_rag_service=grocery_rag_svc)
+        await tool_executor.initialize()
+    return tool_executor
 
 @router.post("/generate")
 async def generate_response(request: GenerateRequest):
@@ -293,6 +384,80 @@ async def chat_response(request: ChatRequest):
             }
     except Exception as e:
         logger.error(f"채팅 엔드포인트 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/chat-with-tools")
+async def chat_with_tools(request: ChatWithToolsRequest, authorization: str = Header(None)):
+    """툴콜링을 지원하는 채팅 엔드포인트 (스트리밍 지원)"""
+    try:
+        # JWT 토큰에서 user_id 추출 (필수)
+        user_id = None
+
+        if authorization and authorization.startswith("Bearer "):
+            token = authorization.replace("Bearer ", "")
+            try:
+                payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+                # user_id가 없으면 userid를 fallback으로 사용 (하위 호환성)
+                user_id = payload.get("user_id") or payload.get("userid")
+
+                if not user_id:
+                    raise HTTPException(status_code=401, detail="유효하지 않은 토큰입니다")
+
+                logger.info(f"JWT 인증 성공, user_id: {user_id}")
+            except jwt.ExpiredSignatureError:
+                logger.warning("JWT 토큰이 만료되었습니다")
+                raise HTTPException(status_code=401, detail="토큰이 만료되었습니다. 다시 로그인해주세요.")
+            except jwt.InvalidTokenError as e:
+                logger.warning(f"JWT 토큰이 유효하지 않습니다: {e}")
+                raise HTTPException(status_code=401, detail="유효하지 않은 토큰입니다")
+        else:
+            logger.error("JWT 토큰이 없습니다")
+            raise HTTPException(status_code=401, detail="인증이 필요합니다. 로그인해주세요.")
+
+        # LLM 핸들러 가져오기
+        handler = get_llm_handler(request.model_key)
+
+        # Tool Executor 가져오기
+        executor = await get_tool_executor()
+
+        # ToolCallingWrapper로 래핑
+        wrapper = ToolCallingWrapper(handler, executor)
+
+        if request.stream:
+            # 스트리밍 응답 (SSE 형식)
+            async def chat_stream():
+                response_text = await wrapper.generate_with_tools(request.message, user_id)
+                # 전체 응답을 청크로 나눠서 스트리밍
+                chunk_size = 10  # 한 번에 보낼 글자 수
+                for i in range(0, len(response_text), chunk_size):
+                    chunk = response_text[i:i + chunk_size]
+                    data = json.dumps({"content": chunk, "done": False}, ensure_ascii=False)
+                    yield f"data: {data}\n\n"
+                    await asyncio.sleep(0.05)  # 약간의 지연으로 스트리밍 효과
+
+                # 완료 신호
+                final_data = json.dumps({"content": "", "done": True})
+                yield f"data: {final_data}\n\n"
+
+            return StreamingResponse(
+                chat_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive"
+                }
+            )
+        else:
+            # 일반 응답
+            response_text = await wrapper.generate_with_tools(request.message, user_id)
+            return {
+                "response": response_text,
+                "message": request.message,
+                "user_id": user_id,
+                "tools_used": True
+            }
+    except Exception as e:
+        logger.error(f"툴콜링 채팅 엔드포인트 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/embed")
@@ -1429,9 +1594,11 @@ async def voice_chat(request: VoiceChatRequest):
         if not request.text:
             raise HTTPException(status_code=400, detail="입력 텍스트가 필요합니다")
 
-        # 1. LLM으로 응답 생성
+        # 1. LLM으로 응답 생성 (Tool Calling 지원)
         llm = get_llm_handler(request.model_key)
-        response_text = llm.chat_generate(request.text, stream=False)
+        executor = await get_tool_executor()
+        wrapper = ToolCallingWrapper(llm, executor)
+        response_text = await wrapper.generate_with_tools(request.text, request.user_id)
 
         # 2. 응답을 음성으로 변환
         speech_service = get_speech_service()
@@ -1443,13 +1610,16 @@ async def voice_chat(request: VoiceChatRequest):
 
         if tts_result["success"]:
             from fastapi.responses import FileResponse
+            from urllib.parse import quote
+            # URL encode the Korean text for HTTP header
+            encoded_response = quote(response_text)
             return FileResponse(
                 tts_result["audio_file"],
                 media_type="audio/mpeg",
                 filename="chat_response.mp3",
                 headers={
                     "Content-Disposition": "attachment; filename=chat_response.mp3",
-                    "X-Response-Text": response_text,
+                    "X-Response-Text": encoded_response,
                     "X-Duration-Estimate": str(tts_result.get("duration_estimate", 0))
                 }
             )
@@ -1468,6 +1638,7 @@ async def voice_chat(request: VoiceChatRequest):
 @router.post("/speech/full-voice-chat")
 async def full_voice_chat(
     audio_file: UploadFile = File(...),
+    user_id: str = "default_user",
     model_key: str = None,
     voice_language: str = "ko",
     voice_slow: bool = False,
@@ -1495,9 +1666,11 @@ async def full_voice_chat(
 
         user_text = stt_result["text"]
 
-        # 2. LLM으로 응답 생성
+        # 2. LLM으로 응답 생성 (Tool Calling 지원)
         llm = get_llm_handler(model_key)
-        response_text = llm.chat_generate(user_text, stream=False)
+        executor = await get_tool_executor()
+        wrapper = ToolCallingWrapper(llm, executor)
+        response_text = await wrapper.generate_with_tools(user_text, user_id)
 
         # 3. 응답을 음성으로 변환
         tts_result = speech_service.text_to_speech(
@@ -1508,14 +1681,18 @@ async def full_voice_chat(
 
         if tts_result["success"]:
             from fastapi.responses import FileResponse
+            from urllib.parse import quote
+            # URL encode Korean text for HTTP headers
+            encoded_user_text = quote(user_text)
+            encoded_response = quote(response_text)
             return FileResponse(
                 tts_result["audio_file"],
                 media_type="audio/mpeg",
                 filename="full_chat_response.mp3",
                 headers={
                     "Content-Disposition": "attachment; filename=full_chat_response.mp3",
-                    "X-User-Text": user_text,
-                    "X-Response-Text": response_text,
+                    "X-User-Text": encoded_user_text,
+                    "X-Response-Text": encoded_response,
                     "X-STT-Method": stt_result.get("method", "unknown"),
                     "X-STT-Confidence": str(stt_result.get("confidence", 0.0)),
                     "X-Duration-Estimate": str(tts_result.get("duration_estimate", 0))
@@ -1735,3 +1912,962 @@ async def get_streaming_tts_status():
     except Exception as e:
         logger.error(f"스트리밍 TTS 상태 조회 오류: {e}")
         raise HTTPException(status_code=500, detail=f"스트리밍 TTS 상태 조회 실패: {str(e)}")
+
+# === RSS 뉴스 API 엔드포인트들 ===
+
+@router.get("/news-rss/keywords", response_model=List[NewsKeyword])
+async def get_trending_keywords_rss(
+    limit: int = Query(default=10, ge=1, le=50, description="반환할 키워드 개수")
+):
+    """실시간 트렌딩 뉴스 키워드를 가져옵니다 (RSS)"""
+    try:
+        service = get_news_service_rss()
+        keywords = await service.get_trending_keywords(limit=limit)
+        return keywords
+    except Exception as e:
+        logger.error(f"RSS 키워드 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"키워드 조회 실패: {str(e)}")
+
+@router.get("/news-rss/articles", response_model=NewsResponse)
+async def get_news_articles_rss(
+    keyword: Optional[str] = Query(None, description="검색할 키워드"),
+    category: Optional[str] = Query(None, description="뉴스 카테고리"),
+    limit: int = Query(default=20, ge=1, le=100, description="반환할 기사 개수")
+):
+    """뉴스 기사를 검색하거나 최신 기사를 가져옵니다 (RSS)"""
+    try:
+        service = get_news_service_rss()
+        articles = await service.get_news_articles(
+            keyword=keyword,
+            category=category,
+            limit=limit
+        )
+
+        return NewsResponse(
+            total=len(articles),
+            articles=articles,
+            keyword=keyword,
+            category=category
+        )
+    except Exception as e:
+        logger.error(f"RSS 뉴스 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"뉴스 조회 실패: {str(e)}")
+
+@router.get("/news-rss/categories")
+async def get_news_categories_rss():
+    """사용 가능한 뉴스 카테고리 목록을 반환합니다 (RSS)"""
+    return {
+        "categories": [
+            {"id": "all", "name": "전체"},
+            {"id": "politics", "name": "정치"},
+            {"id": "economy", "name": "경제"},
+            {"id": "society", "name": "사회"},
+            {"id": "culture", "name": "문화"},
+            {"id": "world", "name": "세계"},
+            {"id": "it", "name": "IT/과학"}
+        ]
+    }
+
+@router.post("/news-rss/keywords/custom")
+async def add_custom_keyword_rss(keyword: str):
+    """사용자 정의 키워드를 추가합니다 (RSS)"""
+    try:
+        service = get_news_service_rss()
+        result = await service.add_custom_keyword(keyword)
+        if result:
+            return {"success": True, "keyword": keyword, "message": "키워드가 추가되었습니다."}
+        else:
+            return {"success": False, "message": "이미 존재하는 키워드이거나 추가할 수 없습니다."}
+    except Exception as e:
+        logger.error(f"RSS 키워드 추가 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"키워드 추가 실패: {str(e)}")
+
+@router.get("/news-rss/keywords/user")
+async def get_user_keywords_rss():
+    """사용자가 등록한 키워드 목록을 반환합니다 (RSS)"""
+    try:
+        service = get_news_service_rss()
+        keywords = await service.get_user_keywords()
+        return {"keywords": keywords}
+    except Exception as e:
+        logger.error(f"RSS 키워드 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"키워드 조회 실패: {str(e)}")
+
+@router.delete("/news-rss/keywords/custom")
+async def delete_keyword_rss(keyword: str):
+    """사용자 키워드를 삭제합니다 (RSS)"""
+    try:
+        service = get_news_service_rss()
+        result = await service.delete_keyword(keyword)
+        if result:
+            return {"success": True, "message": "키워드가 삭제되었습니다."}
+        else:
+            return {"success": False, "message": "키워드를 찾을 수 없습니다."}
+    except Exception as e:
+        logger.error(f"RSS 키워드 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"키워드 삭제 실패: {str(e)}")
+
+# === 재정 관리 API 엔드포인트들 ===
+
+@router.get("/finance/items", response_model=List[FinanceItem])
+async def list_finance_items(category: Optional[str] = None):
+    """재정 항목 목록 조회"""
+    try:
+        service = get_finance_service()
+        items = await service.list_items(category=category)
+        return items
+    except Exception as e:
+        logger.error(f"재정 항목 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"재정 항목 조회 실패: {str(e)}")
+
+@router.post("/finance/items", response_model=FinanceItem)
+async def create_finance_item(item: FinanceItem):
+    """재정 항목 추가"""
+    try:
+        service = get_finance_service()
+        new_item = await service.create_item(item)
+        return new_item
+    except Exception as e:
+        logger.error(f"재정 항목 추가 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"재정 항목 추가 실패: {str(e)}")
+
+@router.get("/finance/items/{item_id}", response_model=FinanceItem)
+async def get_finance_item(item_id: int):
+    """특정 재정 항목 조회"""
+    try:
+        service = get_finance_service()
+        item = await service.get_item(item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Item not found")
+        return item
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"재정 항목 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"재정 항목 조회 실패: {str(e)}")
+
+@router.put("/finance/items/{item_id}", response_model=FinanceItem)
+async def update_finance_item(item_id: int, item: FinanceItem):
+    """재정 항목 수정"""
+    try:
+        service = get_finance_service()
+        updated_item = await service.update_item(item_id, item)
+        if updated_item is None:
+            raise HTTPException(status_code=404, detail="Item not found")
+        return updated_item
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"재정 항목 수정 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"재정 항목 수정 실패: {str(e)}")
+
+@router.delete("/finance/items/{item_id}")
+async def delete_finance_item(item_id: int):
+    """재정 항목 삭제"""
+    try:
+        service = get_finance_service()
+        result = await service.delete_item(item_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Item not found")
+        return {"success": True, "message": "Item deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"재정 항목 삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"재정 항목 삭제 실패: {str(e)}")
+
+# === DB LLM 연동 API 엔드포인트들 ===
+
+@router.post("/chat-with-context")
+async def chat_with_db_context(request: ChatWithContextRequest):
+    """사용자의 DB 데이터를 컨텍스트로 포함한 채팅"""
+    try:
+        # DB에서 사용자 컨텍스트 가져오기
+        db_service = await get_db_llm_service()
+        user_context = await db_service.get_user_context(request.user_id)
+
+        # LLM 핸들러 가져오기
+        handler = get_llm_handler(request.model_key)
+
+        # 컨텍스트와 함께 프롬프트 구성
+        enhanced_prompt = f"""다음은 사용자의 정보입니다:
+
+{user_context}
+
+사용자의 질문: {request.message}
+
+위 정보를 참고하여 사용자의 질문에 답변해주세요."""
+
+        if request.stream:
+            # 스트리밍 응답
+            async def chat_stream():
+                for chunk in handler.generate(enhanced_prompt, max_length=512, stream=True):
+                    if chunk:
+                        data = json.dumps({"content": chunk, "done": False}, ensure_ascii=False)
+                        yield f"data: {data}\n\n"
+                yield f"data: {json.dumps({'content': '', 'done': True})}\n\n"
+
+            return StreamingResponse(
+                chat_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+            )
+        else:
+            # 일반 응답
+            response = handler.generate(enhanced_prompt, max_length=512, stream=False)
+            return {
+                "response": response,
+                "message": request.message,
+                "user_id": request.user_id,
+                "context_included": True,
+                "model_info": {
+                    "model_key": handler.model_key,
+                    "model_id": handler.SUPPORTED_MODELS[handler.model_key]["model_id"],
+                    "description": handler.SUPPORTED_MODELS[handler.model_key]["description"],
+                    "category": handler.SUPPORTED_MODELS[handler.model_key]["category"],
+                    "loaded": handler.model is not None
+                }
+            }
+
+    except Exception as e:
+        logger.error(f"컨텍스트 채팅 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/user/{user_id}/context")
+async def get_user_context(user_id: str):
+    """사용자의 DB 컨텍스트 조회"""
+    try:
+        db_service = await get_db_llm_service()
+        context = await db_service.get_user_context(user_id)
+
+        return {
+            "user_id": user_id,
+            "context": context,
+            "success": True
+        }
+    except Exception as e:
+        logger.error(f"사용자 컨텍스트 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/user/{user_id}/data/{data_type}")
+async def get_user_data(user_id: str, data_type: str, date: str = None):
+    """특정 유형의 사용자 데이터 조회"""
+    try:
+        db_service = await get_db_llm_service()
+
+        kwargs = {}
+        if date:
+            kwargs['date'] = date
+
+        data = await db_service.query_database(user_id, data_type, **kwargs)
+
+        return {
+            "user_id": user_id,
+            "data_type": data_type,
+            "data": data,
+            "count": len(data),
+            "success": True
+        }
+    except Exception as e:
+        logger.error(f"사용자 데이터 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# === Health 관리 API 엔드포인트들 ===
+
+# Disease 관련 API
+@router.get("/health/diseases")
+async def list_diseases(authorization: str = Header(None)):
+    """모든 기저질환 조회"""
+    try:
+        from services.auth_service import get_current_user_id, set_request_context
+        set_request_context(authorization)
+        user_id = get_current_user_id()
+
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "SELECT disease_id as diseaseId, name, diagnosed_date as diagnosedDate, status FROM disease WHERE user_id = %s ORDER BY disease_id DESC",
+                    (user_id,)
+                )
+                diseases = await cursor.fetchall()
+
+                # Convert datetime to string
+                for disease in diseases:
+                    if disease.get('diagnosedDate'):
+                        disease['diagnosedDate'] = disease['diagnosedDate'].isoformat()
+
+                return diseases
+    except Exception as e:
+        logger.error(f"기저질환 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/health/diseases")
+async def create_disease(disease: DiseaseRequest, authorization: str = Header(None)):
+    """새로운 기저질환 추가"""
+    try:
+        from services.auth_service import get_current_user_id, set_request_context
+        set_request_context(authorization)
+        user_id = get_current_user_id()
+
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "INSERT INTO disease (user_id, name, diagnosed_date, status) VALUES (%s, %s, %s, %s)",
+                    (user_id, disease.name, disease.diagnosedDate, disease.status)
+                )
+                disease_id = cursor.lastrowid
+
+                return {
+                    "diseaseId": disease_id,
+                    "name": disease.name,
+                    "diagnosedDate": disease.diagnosedDate,
+                    "status": disease.status
+                }
+    except Exception as e:
+        logger.error(f"기저질환 추가 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/health/diseases/{disease_id}")
+async def get_disease(disease_id: int):
+    """특정 기저질환 조회"""
+    try:
+        from services.auth_service import get_current_user_id
+        user_id = get_current_user_id()
+
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "SELECT disease_id as diseaseId, name, diagnosed_date as diagnosedDate, status FROM disease WHERE disease_id = %s AND user_id = %s",
+                    (disease_id, user_id)
+                )
+                disease = await cursor.fetchone()
+
+                if not disease:
+                    raise HTTPException(status_code=404, detail="질환을 찾을 수 없습니다")
+
+                if disease.get('diagnosedDate'):
+                    disease['diagnosedDate'] = disease['diagnosedDate'].isoformat()
+
+                return disease
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"기저질환 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/health/diseases/{disease_id}")
+async def update_disease(disease_id: int, disease: DiseaseRequest):
+    """기저질환 수정"""
+    try:
+        from services.auth_service import get_current_user_id
+        user_id = get_current_user_id()
+
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "UPDATE disease SET name = %s, diagnosed_date = %s, status = %s WHERE disease_id = %s AND user_id = %s",
+                    (disease.name, disease.diagnosedDate, disease.status, disease_id, user_id)
+                )
+
+                if cursor.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="질환을 찾을 수 없습니다")
+
+                return {
+                    "diseaseId": disease_id,
+                    "name": disease.name,
+                    "diagnosedDate": disease.diagnosedDate,
+                    "status": disease.status
+                }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"기저질환 수정 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/health/diseases/{disease_id}")
+async def delete_disease(disease_id: int):
+    """기저질환 삭제"""
+    try:
+        from services.auth_service import get_current_user_id
+        user_id = get_current_user_id()
+
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "DELETE FROM disease WHERE disease_id = %s AND user_id = %s",
+                    (disease_id, user_id)
+                )
+
+                if cursor.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="질환을 찾을 수 없습니다")
+
+                return {"success": True, "message": "질환이 삭제되었습니다"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"기저질환 삭제 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Medication 관련 API
+@router.get("/health/medications")
+async def list_medications(authorization: str = Header(None)):
+    """모든 복약 알람 조회"""
+    try:
+        from services.auth_service import get_current_user_id, set_request_context
+        set_request_context(authorization)
+        user_id = get_current_user_id()
+
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "SELECT medication_id as medicationId, name, dosage, intake_time as intakeTime, alarm_enabled as alarmEnabled FROM medication WHERE user_id = %s ORDER BY medication_id DESC",
+                    (user_id,)
+                )
+                medications = await cursor.fetchall()
+
+                # Convert time and bit to proper format
+                for med in medications:
+                    if med.get('intakeTime') is not None:
+                        # Convert timedelta to string
+                        total_seconds = int(med['intakeTime'].total_seconds())
+                        hours = total_seconds // 3600
+                        minutes = (total_seconds % 3600) // 60
+                        med['intakeTime'] = f"{hours:02d}:{minutes:02d}"
+                    if med.get('alarmEnabled') is not None:
+                        med['alarmEnabled'] = bool(med['alarmEnabled'])
+
+                return medications
+    except Exception as e:
+        logger.error(f"복약 알람 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/health/medications")
+async def create_medication(medication: MedicationRequest, authorization: str = Header(None)):
+    """새로운 복약 알람 추가"""
+    try:
+        from services.auth_service import get_current_user_id, set_request_context
+        set_request_context(authorization)
+        user_id = get_current_user_id()
+
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "INSERT INTO medication (user_id, name, dosage, intake_time, alarm_enabled) VALUES (%s, %s, %s, %s, %s)",
+                    (user_id, medication.name, medication.dosage, medication.intakeTime, medication.alarmEnabled)
+                )
+                medication_id = cursor.lastrowid
+
+                return {
+                    "medicationId": medication_id,
+                    "name": medication.name,
+                    "dosage": medication.dosage,
+                    "intakeTime": medication.intakeTime,
+                    "alarmEnabled": medication.alarmEnabled
+                }
+    except Exception as e:
+        logger.error(f"복약 알람 추가 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/health/medications/{medication_id}")
+async def get_medication(medication_id: int):
+    """특정 복약 알람 조회"""
+    try:
+        from services.auth_service import get_current_user_id
+        user_id = get_current_user_id()
+
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "SELECT medication_id as medicationId, name, dosage, intake_time as intakeTime, alarm_enabled as alarmEnabled FROM medication WHERE medication_id = %s AND user_id = %s",
+                    (medication_id, user_id)
+                )
+                medication = await cursor.fetchone()
+
+                if not medication:
+                    raise HTTPException(status_code=404, detail="복약 알람을 찾을 수 없습니다")
+
+                if medication.get('intakeTime') is not None:
+                    total_seconds = int(medication['intakeTime'].total_seconds())
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+                    medication['intakeTime'] = f"{hours:02d}:{minutes:02d}"
+                if medication.get('alarmEnabled') is not None:
+                    medication['alarmEnabled'] = bool(medication['alarmEnabled'])
+
+                return medication
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"복약 알람 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/health/medications/{medication_id}")
+async def update_medication(medication_id: int, medication: MedicationRequest):
+    """복약 알람 수정"""
+    try:
+        from services.auth_service import get_current_user_id
+        user_id = get_current_user_id()
+
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "UPDATE medication SET name = %s, dosage = %s, intake_time = %s, alarm_enabled = %s WHERE medication_id = %s AND user_id = %s",
+                    (medication.name, medication.dosage, medication.intakeTime, medication.alarmEnabled, medication_id, user_id)
+                )
+
+                if cursor.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="복약 알람을 찾을 수 없습니다")
+
+                return {
+                    "medicationId": medication_id,
+                    "name": medication.name,
+                    "dosage": medication.dosage,
+                    "intakeTime": medication.intakeTime,
+                    "alarmEnabled": medication.alarmEnabled
+                }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"복약 알람 수정 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/health/medications/{medication_id}")
+async def delete_medication(medication_id: int):
+    """복약 알람 삭제"""
+    try:
+        from services.auth_service import get_current_user_id
+        user_id = get_current_user_id()
+
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "DELETE FROM medication WHERE medication_id = %s AND user_id = %s",
+                    (medication_id, user_id)
+                )
+
+                if cursor.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="복약 알람을 찾을 수 없습니다")
+
+                return {"success": True, "message": "복약 알람이 삭제되었습니다"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"복약 알람 삭제 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/grocery/deals")
+async def get_grocery_deals():
+    """식료품 가격 정보 조회"""
+    try:
+        from pathlib import Path
+
+        # grocery_deals.json 파일 경로
+        grocery_data_path = Path(__file__).parent.parent.parent / "data" / "grocery_deals.json"
+
+        if not grocery_data_path.exists():
+            raise HTTPException(status_code=404, detail="식료품 데이터를 찾을 수 없습니다")
+
+        with open(grocery_data_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        return data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"식료품 데이터 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+# ===========================
+# 회원가입 관련 엔드포인트
+# ===========================
+
+from typing import Optional
+
+# JWT 설정
+JWT_SECRET_KEY = "your-secret-key-change-this-in-production"  # 실제 환경에서는 환경변수로 관리
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = 24
+
+# Pydantic 모델
+class StartRegisterRequest(BaseModel):
+    language: str
+
+class StartRegisterResponse(BaseModel):
+    registrationId: str
+
+class ConsentsRequest(BaseModel):
+    registrationId: str
+    consentHealth: bool
+    consentFinance: bool
+    consentSocial: bool
+    consentClp: bool
+
+class ProfileRequest(BaseModel):
+    registrationId: str
+    name: str
+    nickname: str
+
+class CredentialsRequest(BaseModel):
+    registrationId: str
+    userid: str
+    passwordHash: str
+    issueToken: bool = True
+
+class TokenResponse(BaseModel):
+    token: Optional[str]
+
+class LoginRequest(BaseModel):
+    userid: str
+    passwordHash: str
+
+# Database connection pool for registration
+registration_db_pool = None
+
+async def get_registration_db_pool():
+    """회원가입용 DB 연결 풀 가져오기"""
+    global registration_db_pool
+    if registration_db_pool is None:
+        db_config = config.mariadb_config
+        registration_db_pool = await aiomysql.create_pool(
+            host=db_config['host'],
+            port=db_config['port'],
+            user=db_config['user'],
+            password=db_config['password'],
+            db='euphoria',  # euphoria 데이터베이스 사용
+            charset='utf8mb4',
+            autocommit=True,
+            minsize=1,
+            maxsize=10
+        )
+    return registration_db_pool
+
+@router.post("/register/start", response_model=StartRegisterResponse)
+async def start_register(request: StartRegisterRequest):
+    """회원가입 시작 - registration_id 발급"""
+    try:
+        registration_id = str(uuid.uuid4())
+        expires_at = datetime.now() + timedelta(hours=1)  # 1시간 후 만료
+        
+        pool = await get_registration_db_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    """INSERT INTO temp_registrations 
+                       (registration_id, language, created_at, expires_at) 
+                       VALUES (%s, %s, %s, %s)""",
+                    (registration_id, request.language, datetime.now(), expires_at)
+                )
+        
+        logger.info(f"회원가입 시작: {registration_id}")
+        return StartRegisterResponse(registrationId=registration_id)
+    except Exception as e:
+        logger.error(f"회원가입 시작 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/register/consents")
+async def save_consents(request: ConsentsRequest):
+    """동의 사항 저장"""
+    try:
+        pool = await get_registration_db_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                # registration_id 확인
+                await cursor.execute(
+                    "SELECT registration_id FROM temp_registrations WHERE registration_id = %s",
+                    (request.registrationId,)
+                )
+                result = await cursor.fetchone()
+                
+                if not result:
+                    raise HTTPException(status_code=404, detail="등록 정보를 찾을 수 없습니다")
+                
+                # 동의 사항 업데이트
+                await cursor.execute(
+                    """UPDATE temp_registrations 
+                       SET consent_health = %s, consent_finance = %s, 
+                           consent_social = %s, consent_clp = %s
+                       WHERE registration_id = %s""",
+                    (request.consentHealth, request.consentFinance, 
+                     request.consentSocial, request.consentClp, request.registrationId)
+                )
+        
+        logger.info(f"동의 사항 저장: {request.registrationId}")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"동의 사항 저장 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/register/profile")
+async def save_profile(request: ProfileRequest):
+    """프로필 정보 저장"""
+    try:
+        pool = await get_registration_db_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                # registration_id 확인
+                await cursor.execute(
+                    "SELECT registration_id FROM temp_registrations WHERE registration_id = %s",
+                    (request.registrationId,)
+                )
+                result = await cursor.fetchone()
+                
+                if not result:
+                    raise HTTPException(status_code=404, detail="등록 정보를 찾을 수 없습니다")
+                
+                # 프로필 정보 업데이트
+                await cursor.execute(
+                    """UPDATE temp_registrations 
+                       SET name = %s, nickname = %s
+                       WHERE registration_id = %s""",
+                    (request.name, request.nickname, request.registrationId)
+                )
+        
+        logger.info(f"프로필 저장: {request.registrationId}")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"프로필 저장 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/register/credentials", response_model=TokenResponse)
+async def finalize_registration(request: CredentialsRequest):
+    """회원가입 완료 - 사용자 생성 및 토큰 발급"""
+    try:
+        pool = await get_registration_db_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                # 임시 등록 정보 가져오기
+                await cursor.execute(
+                    "SELECT * FROM temp_registrations WHERE registration_id = %s",
+                    (request.registrationId,)
+                )
+                temp_reg = await cursor.fetchone()
+                
+                if not temp_reg:
+                    raise HTTPException(status_code=404, detail="등록 정보를 찾을 수 없습니다")
+                
+                # userid 중복 확인
+                await cursor.execute(
+                    "SELECT userid FROM users WHERE userid = %s",
+                    (request.userid,)
+                )
+                existing_user = await cursor.fetchone()
+                
+                if existing_user:
+                    raise HTTPException(status_code=400, detail="이미 사용 중인 아이디입니다")
+                
+                # 사용자 생성
+                await cursor.execute(
+                    """INSERT INTO users 
+                       (userid, name, nickname, password_hash, language, 
+                        consent_health, consent_finance, consent_social, consent_clp,
+                        created_at, updated_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (request.userid, temp_reg['name'], temp_reg['nickname'], request.passwordHash,
+                     temp_reg['language'], temp_reg['consent_health'], temp_reg['consent_finance'],
+                     temp_reg['consent_social'], temp_reg['consent_clp'], 
+                     datetime.now(), datetime.now())
+                )
+                
+                # 임시 등록 정보 삭제
+                await cursor.execute(
+                    "DELETE FROM temp_registrations WHERE registration_id = %s",
+                    (request.registrationId,)
+                )
+        
+        # JWT 토큰 발급
+        token = None
+        if request.issueToken:
+            payload = {
+                "userid": request.userid,
+                "user_id": request.userid,  # user_id도 추가 (일관성을 위해)
+                "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS)
+            }
+            token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+        logger.info(f"회원가입 완료: {request.userid}, JWT에 user_id 포함됨")
+        return TokenResponse(token=token)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"회원가입 완료 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/login", response_model=TokenResponse)
+async def login(request: LoginRequest):
+    """로그인"""
+    try:
+        pool = await get_registration_db_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                # 사용자 확인
+                await cursor.execute(
+                    "SELECT userid, password_hash FROM users WHERE userid = %s",
+                    (request.userid,)
+                )
+                user = await cursor.fetchone()
+                
+                if not user:
+                    raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다")
+                
+                # 비밀번호 확인
+                if user['password_hash'] != request.passwordHash:
+                    raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다")
+        
+        # JWT 토큰 발급
+        payload = {
+            "userid": request.userid,
+            "user_id": request.userid,  # user_id도 추가 (일관성을 위해)
+            "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS)
+        }
+        token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+        logger.info(f"로그인 성공: {request.userid}, JWT에 user_id 포함됨")
+        return TokenResponse(token=token)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"로그인 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/logout")
+async def logout():
+    """로그아웃 (클라이언트에서 토큰 삭제)"""
+    return {"success": True, "message": "로그아웃되었습니다"}
+
+
+# ==================== Calendar API ====================
+
+@router.get("/calendar/events")
+async def get_calendar_events(authorization: str = Header(None)):
+    """일정 목록 조회 (DB 사용)"""
+    from services.auth_service import get_current_user_id, set_request_context
+    set_request_context(authorization)
+    user_id = get_current_user_id()
+
+    try:
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    """SELECT id, event_type, title, description, location,
+                              event_date, event_time, is_completed, reminder_enabled
+                       FROM calendar_events
+                       WHERE user_id = %s
+                       ORDER BY event_date, event_time""",
+                    (user_id,)
+                )
+                events = await cursor.fetchall()
+
+                # 날짜/시간 변환
+                for event in events:
+                    if event.get('event_date'):
+                        event['event_date'] = event['event_date'].isoformat()
+                    if event.get('event_time'):
+                        td = event['event_time']
+                        hours, remainder = divmod(td.seconds, 3600)
+                        minutes, _ = divmod(remainder, 60)
+                        event['event_time'] = f"{hours:02d}:{minutes:02d}"
+                    event['event_id'] = event['id']
+
+                logger.info(f"일정 조회: user_id={user_id}, count={len(events)}")
+                return events
+    except Exception as e:
+        logger.error(f"일정 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/calendar/events")
+async def create_calendar_event(event: dict, authorization: str = Header(None)):
+    """일정 추가 (DB 사용)"""
+    from services.auth_service import get_current_user_id, set_request_context
+    set_request_context(authorization)
+    user_id = get_current_user_id()
+
+    try:
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                # 일정 추가
+                await cursor.execute(
+                    """INSERT INTO calendar_events
+                       (user_id, event_type, title, description, location, event_date, event_time, is_completed)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        user_id,
+                        event.get("event_type", "일정"),
+                        event.get("summary") or event.get("title", "제목 없음"),
+                        event.get("description", ""),
+                        event.get("location", ""),
+                        event.get("startDateTime", "").split("T")[0] if event.get("startDateTime") else event.get("event_date", ""),
+                        event.get("startDateTime", "").split("T")[1][:8] if event.get("startDateTime") and "T" in event.get("startDateTime", "") else event.get("time", "09:00:00"),
+                        False
+                    )
+                )
+                await conn.commit()
+
+                new_id = cursor.lastrowid
+
+                # 추가된 일정 조회
+                await cursor.execute(
+                    """SELECT id, event_type, title, description, location,
+                              event_date, event_time, is_completed
+                       FROM calendar_events WHERE id = %s""",
+                    (new_id,)
+                )
+                new_event = await cursor.fetchone()
+
+                # 시간 변환
+                if new_event.get('event_date'):
+                    new_event['event_date'] = new_event['event_date'].isoformat()
+                if new_event.get('event_time'):
+                    td = new_event['event_time']
+                    hours, remainder = divmod(td.seconds, 3600)
+                    minutes, _ = divmod(remainder, 60)
+                    new_event['event_time'] = f"{hours:02d}:{minutes:02d}"
+                new_event['event_id'] = new_event['id']
+
+                logger.info(f"일정 추가: user_id={user_id}, event_id={new_id}")
+                return new_event
+    except Exception as e:
+        logger.error(f"일정 추가 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/calendar/events/{event_id}")
+async def delete_calendar_event(event_id: int, authorization: str = Header(None)):
+    """일정 삭제 (DB 사용)"""
+    from services.auth_service import get_current_user_id, set_request_context
+    set_request_context(authorization)
+    user_id = get_current_user_id()
+
+    try:
+        db_service = await get_db_llm_service()
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "DELETE FROM calendar_events WHERE id = %s AND user_id = %s",
+                    (event_id, user_id)
+                )
+                await conn.commit()
+
+                if cursor.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다")
+
+                logger.info(f"일정 삭제: user_id={user_id}, event_id={event_id}")
+                return {"success": True, "message": "일정이 삭제되었습니다"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"일정 삭제 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -46,3 +46,9 @@ speechrecognition
 gtts
 pydub
 # pyaudio  # 시스템 의존성 필요 - 별도 설치 필요
+
+# RSS 뉴스 및 웹 크롤링 (fastapi_backend에서 이동)
+requests
+beautifulsoup4
+feedparser
+python-multipart

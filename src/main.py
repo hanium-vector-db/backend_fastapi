@@ -100,12 +100,27 @@ def read_root():
             "시스템 정보": {
                 "gpu": "/api/v1/system/gpu"
             },
-            "뉴스 기능": {
+            "뉴스 기능 (Tavily)": {
                 "latest_news": "/api/v1/news/latest",
                 "search_news": "/api/v1/news/search",
                 "news_summary": "/api/v1/news/summary",
                 "news_analysis": "/api/v1/news/analysis",
                 "news_categories": "/api/v1/news/categories"
+            },
+            "뉴스 기능 (RSS)": {
+                "trending_keywords": "/api/v1/news-rss/keywords",
+                "news_articles": "/api/v1/news-rss/articles",
+                "rss_categories": "/api/v1/news-rss/categories",
+                "add_custom_keyword": "/api/v1/news-rss/keywords/custom",
+                "user_keywords": "/api/v1/news-rss/keywords/user",
+                "delete_keyword": "/api/v1/news-rss/keywords/custom"
+            },
+            "재정 관리": {
+                "list_items": "/api/v1/finance/items",
+                "create_item": "/api/v1/finance/items",
+                "get_item": "/api/v1/finance/items/{item_id}",
+                "update_item": "/api/v1/finance/items/{item_id}",
+                "delete_item": "/api/v1/finance/items/{item_id}"
             },
             "External-Web RAG": {
                 "auto_rag": "/api/v1/external-web/auto-rag",

@@ -36,7 +36,7 @@ components:
   # 텍스트 생성 설정
   text_generation:
     max_length: 4000
-    default_model: "llama3.1-8b"
+    default_model: "qwen2.5-7b"
     streaming_enabled: true
     temperature_range: [0.0, 2.0]
     temperature_default: 0.7

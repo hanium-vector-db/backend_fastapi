@@ -1,0 +1,374 @@
+[
+  {
+    "category": "과일",
+    "product": "바나나",
+    "unit": "1kg",
+    "stores": [
+      {"name": "이마트", "price": 3980, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 4200, "location": "전국", "discount": "10%"},
+      {"name": "홈플러스", "price": 3890, "location": "전국", "discount": null},
+      {"name": "코스트코", "price": 3500, "location": "주요도시", "discount": null},
+      {"name": "쿠팡", "price": 3850, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "과일",
+    "product": "사과",
+    "unit": "1kg (4-5개)",
+    "stores": [
+      {"name": "이마트", "price": 8900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 9200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 8500, "location": "전국", "discount": "5%"},
+      {"name": "농협하나로마트", "price": 7800, "location": "전국", "discount": null},
+      {"name": "쿠팡", "price": 8200, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "과일",
+    "product": "오렌지",
+    "unit": "1.5kg (8-10개)",
+    "stores": [
+      {"name": "이마트", "price": 12900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 13500, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 12500, "location": "전국", "discount": "10%"},
+      {"name": "코스트코", "price": 11800, "location": "주요도시", "discount": null},
+      {"name": "마켓컬리", "price": 12300, "location": "온라인", "discount": "새벽배송"}
+    ]
+  },
+  {
+    "category": "과일",
+    "product": "딸기",
+    "unit": "500g",
+    "stores": [
+      {"name": "이마트", "price": 15900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 16500, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 15500, "location": "전국", "discount": "5%"},
+      {"name": "농협하나로마트", "price": 14800, "location": "전국", "discount": null},
+      {"name": "마켓컬리", "price": 15200, "location": "온라인", "discount": "새벽배송"}
+    ]
+  },
+  {
+    "category": "채소",
+    "product": "양파",
+    "unit": "3kg",
+    "stores": [
+      {"name": "이마트", "price": 4980, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 5200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 4800, "location": "전국", "discount": null},
+      {"name": "농협하나로마트", "price": 4500, "location": "전국", "discount": null},
+      {"name": "쿠팡", "price": 4750, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "채소",
+    "product": "감자",
+    "unit": "3kg",
+    "stores": [
+      {"name": "이마트", "price": 7900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 8200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 7600, "location": "전국", "discount": "5%"},
+      {"name": "농협하나로마트", "price": 7200, "location": "전국", "discount": null},
+      {"name": "쿠팡", "price": 7500, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "채소",
+    "product": "당근",
+    "unit": "1kg",
+    "stores": [
+      {"name": "이마트", "price": 3480, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 3690, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 3390, "location": "전국", "discount": null},
+      {"name": "농협하나로마트", "price": 3100, "location": "전국", "discount": null},
+      {"name": "마켓컬리", "price": 3280, "location": "온라인", "discount": "새벽배송"}
+    ]
+  },
+  {
+    "category": "채소",
+    "product": "배추",
+    "unit": "1포기 (약 2.5kg)",
+    "stores": [
+      {"name": "이마트", "price": 5980, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 6200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 5800, "location": "전국", "discount": null},
+      {"name": "농협하나로마트", "price": 5500, "location": "전국", "discount": null},
+      {"name": "쿠팡", "price": 5750, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "채소",
+    "product": "상추",
+    "unit": "150g (1봉)",
+    "stores": [
+      {"name": "이마트", "price": 2980, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 3100, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 2880, "location": "전국", "discount": null},
+      {"name": "농협하나로마트", "price": 2500, "location": "전국", "discount": null},
+      {"name": "마켓컬리", "price": 2780, "location": "온라인", "discount": "새벽배송"}
+    ]
+  },
+  {
+    "category": "육류",
+    "product": "돼지고기 삼겹살",
+    "unit": "600g (국내산)",
+    "stores": [
+      {"name": "이마트", "price": 12900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 13500, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 12600, "location": "전국", "discount": "10%"},
+      {"name": "코스트코", "price": 11800, "location": "주요도시", "discount": null},
+      {"name": "쿠팡", "price": 12300, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "육류",
+    "product": "소고기 불고기용",
+    "unit": "500g (냉장, 호주산)",
+    "stores": [
+      {"name": "이마트", "price": 16900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 17500, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 16500, "location": "전국", "discount": "5%"},
+      {"name": "코스트코", "price": 15800, "location": "주요도시", "discount": null},
+      {"name": "쿠팡", "price": 16200, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "육류",
+    "product": "닭가슴살",
+    "unit": "1kg (냉장, 국내산)",
+    "stores": [
+      {"name": "이마트", "price": 8900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 9200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 8600, "location": "전국", "discount": "10%"},
+      {"name": "코스트코", "price": 7900, "location": "주요도시", "discount": null},
+      {"name": "마켓컬리", "price": 8500, "location": "온라인", "discount": "새벽배송"}
+    ]
+  },
+  {
+    "category": "유제품",
+    "product": "우유",
+    "unit": "2.3L (서울우유)",
+    "stores": [
+      {"name": "이마트", "price": 6480, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 6680, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 6380, "location": "전국", "discount": null},
+      {"name": "코스트코", "price": 5980, "location": "주요도시", "discount": null},
+      {"name": "쿠팡", "price": 6280, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "유제품",
+    "product": "요거트",
+    "unit": "4개입 (500g)",
+    "stores": [
+      {"name": "이마트", "price": 3980, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 4100, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 3880, "location": "전국", "discount": "5%"},
+      {"name": "세븐일레븐", "price": 4200, "location": "전국", "discount": null},
+      {"name": "쿠팡", "price": 3950, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "유제품",
+    "product": "치즈",
+    "unit": "400g (모짜렐라)",
+    "stores": [
+      {"name": "이마트", "price": 8900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 9200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 8700, "location": "전국", "discount": null},
+      {"name": "코스트코", "price": 7900, "location": "주요도시", "discount": null},
+      {"name": "마켓컬리", "price": 8500, "location": "온라인", "discount": "새벽배송"}
+    ]
+  },
+  {
+    "category": "생활용품",
+    "product": "화장지",
+    "unit": "30롤 (3겹)",
+    "stores": [
+      {"name": "이마트", "price": 19900, "location": "전국", "discount": "10%"},
+      {"name": "롯데마트", "price": 21000, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 19500, "location": "전국", "discount": "15%"},
+      {"name": "코스트코", "price": 17900, "location": "주요도시", "discount": null},
+      {"name": "쿠팡", "price": 18800, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "생활용품",
+    "product": "주방세제",
+    "unit": "2L (리필용)",
+    "stores": [
+      {"name": "이마트", "price": 5980, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 6200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 5800, "location": "전국", "discount": "10%"},
+      {"name": "다이소", "price": 5500, "location": "전국", "discount": null},
+      {"name": "쿠팡", "price": 5750, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "생활용품",
+    "product": "샴푸",
+    "unit": "1.5L (리필용)",
+    "stores": [
+      {"name": "이마트", "price": 12900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 13500, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 12500, "location": "전국", "discount": "5%"},
+      {"name": "올리브영", "price": 12800, "location": "전국", "discount": "10%"},
+      {"name": "쿠팡", "price": 12300, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "곡물",
+    "product": "쌀",
+    "unit": "10kg (백미)",
+    "stores": [
+      {"name": "이마트", "price": 39900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 41000, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 39500, "location": "전국", "discount": null},
+      {"name": "농협하나로마트", "price": 38000, "location": "전국", "discount": null},
+      {"name": "쿠팡", "price": 39200, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "곡물",
+    "product": "라면",
+    "unit": "40개입 (신라면)",
+    "stores": [
+      {"name": "이마트", "price": 28900, "location": "전국", "discount": "10%"},
+      {"name": "롯데마트", "price": 29800, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 28500, "location": "전국", "discount": "15%"},
+      {"name": "코스트코", "price": 26900, "location": "주요도시", "discount": null},
+      {"name": "쿠팡", "price": 27800, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "간식",
+    "product": "과자",
+    "unit": "500g (포카칩)",
+    "stores": [
+      {"name": "이마트", "price": 3980, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 4100, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 3880, "location": "전국", "discount": "10%"},
+      {"name": "세븐일레븐", "price": 4300, "location": "전국", "discount": null},
+      {"name": "쿠팡", "price": 3850, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "음료",
+    "product": "생수",
+    "unit": "2L x 12개",
+    "stores": [
+      {"name": "이마트", "price": 9900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 10200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 9700, "location": "전국", "discount": null},
+      {"name": "코스트코", "price": 8900, "location": "주요도시", "discount": null},
+      {"name": "쿠팡", "price": 9500, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "음료",
+    "product": "탄산음료",
+    "unit": "1.5L x 6개 (코카콜라)",
+    "stores": [
+      {"name": "이마트", "price": 11900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 12300, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 11600, "location": "전국", "discount": "5%"},
+      {"name": "코스트코", "price": 10800, "location": "주요도시", "discount": null},
+      {"name": "쿠팡", "price": 11200, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "수산물",
+    "product": "고등어",
+    "unit": "2마리 (냉동, 국내산)",
+    "stores": [
+      {"name": "이마트", "price": 7900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 8200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 7700, "location": "전국", "discount": null},
+      {"name": "농협하나로마트", "price": 7300, "location": "전국", "discount": null},
+      {"name": "마켓컬리", "price": 7600, "location": "온라인", "discount": "새벽배송"}
+    ]
+  },
+  {
+    "category": "수산물",
+    "product": "냉동새우",
+    "unit": "500g",
+    "stores": [
+      {"name": "이마트", "price": 12900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 13500, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 12600, "location": "전국", "discount": null},
+      {"name": "코스트코", "price": 11800, "location": "주요도시", "discount": null},
+      {"name": "마켓컬리", "price": 12300, "location": "온라인", "discount": "새벽배송"}
+    ]
+  },
+  {
+    "category": "양념",
+    "product": "간장",
+    "unit": "1.8L",
+    "stores": [
+      {"name": "이마트", "price": 8900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 9200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 8700, "location": "전국", "discount": "5%"},
+      {"name": "다이소", "price": 8500, "location": "전국", "discount": null},
+      {"name": "쿠팡", "price": 8650, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "양념",
+    "product": "고추장",
+    "unit": "500g",
+    "stores": [
+      {"name": "이마트", "price": 5980, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 6200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 5850, "location": "전국", "discount": null},
+      {"name": "농협하나로마트", "price": 5500, "location": "전국", "discount": null},
+      {"name": "쿠팡", "price": 5780, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "냉동식품",
+    "product": "만두",
+    "unit": "1kg (고기만두)",
+    "stores": [
+      {"name": "이마트", "price": 9900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 10200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 9700, "location": "전국", "discount": "10%"},
+      {"name": "코스트코", "price": 8900, "location": "주요도시", "discount": null},
+      {"name": "쿠팡", "price": 9500, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "냉동식품",
+    "product": "피자",
+    "unit": "400g",
+    "stores": [
+      {"name": "이마트", "price": 7900, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 8200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 7700, "location": "전국", "discount": "5%"},
+      {"name": "세븐일레븐", "price": 8500, "location": "전국", "discount": null},
+      {"name": "쿠팡", "price": 7650, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "베이커리",
+    "product": "식빵",
+    "unit": "420g (10조각)",
+    "stores": [
+      {"name": "이마트", "price": 3480, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 3680, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 3390, "location": "전국", "discount": null},
+      {"name": "파리바게뜨", "price": 3800, "location": "전국", "discount": null},
+      {"name": "쿠팡", "price": 3550, "location": "온라인", "discount": "로켓배송"}
+    ]
+  },
+  {
+    "category": "계란",
+    "product": "계란",
+    "unit": "30개입 (대란)",
+    "stores": [
+      {"name": "이마트", "price": 7980, "location": "전국", "discount": null},
+      {"name": "롯데마트", "price": 8200, "location": "전국", "discount": null},
+      {"name": "홈플러스", "price": 7800, "location": "전국", "discount": null},
+      {"name": "농협하나로마트", "price": 7500, "location": "전국", "discount": null},
+      {"name": "마켓컬리", "price": 7750, "location": "온라인", "discount": "새벽배송"}
+    ]
+  }
+]

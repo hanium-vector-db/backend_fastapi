@@ -13,7 +13,7 @@ database:
   # MariaDB 설정
   mariadb:
     host: "127.0.0.1"
-    port: 53301
+    port: 54000
     user: "manager"
     password: "SqlDba-1"
     database: "sql_db"
@@ -25,10 +25,10 @@ database:
 
 # 모델 설정
 models:
-  # 기본 LLM 모델
+  # 기본 LLM 모델 (QWEN만 사용)
   default_llm:
-    model_id: "meta-llama/Meta-Llama-3-8B-Instruct"
-    model_key: "llama3.1-8b"
+    model_id: "Qwen/Qwen2.5-7B-Instruct"
+    model_key: "qwen2.5-7b"
     device: "cuda:0"
     torch_dtype: "float16"
     

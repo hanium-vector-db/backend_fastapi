@@ -9,9 +9,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class LLMHandler:
-    """3개 모델만 지원하는 LLM 핸들러"""
-    
-    # 지원하는 3개 모델만 정의
+    """QWEN 모델만 지원하는 LLM 핸들러"""
+
+    # QWEN 모델만 정의
     SUPPORTED_MODELS = {
         "qwen2.5-7b": {
             "model_id": "Qwen/Qwen2.5-7B-Instruct",
@@ -21,28 +21,10 @@ class LLMHandler:
             "gpu_requirement": "8GB",
             "performance_score": 85,
             "use_cases": ["general", "korean", "coding"]
-        },
-        "llama3.1-8b": {
-            "model_id": "meta-llama/Meta-Llama-3-8B-Instruct",
-            "description": "Meta Llama 3 8B - 고성능 모델",
-            "category": "medium", 
-            "ram_requirement": "16GB",
-            "gpu_requirement": "8GB",
-            "performance_score": 88,
-            "use_cases": ["general", "coding", "reasoning"]
-        },
-        "gemma-3-4b": {
-            "model_id": "google/gemma-2-9b-it",
-            "description": "Google Gemma 2 9B - 효율적인 중형 모델",
-            "category": "medium",
-            "ram_requirement": "18GB", 
-            "gpu_requirement": "10GB",
-            "performance_score": 82,
-            "use_cases": ["general", "multilingual"]
         }
     }
 
-    def __init__(self, model_key: str = "llama3.1-8b"):
+    def __init__(self, model_key: str = "qwen2.5-7b"):
         self.model_key = model_key
         self.model = None
         self.tokenizer = None
@@ -250,13 +232,15 @@ class LLMHandler:
         return self.generate(message, max_length=512, stream=stream)
 
     def _format_prompt(self, prompt: str) -> str:
-        """모델별 프롬프트 포맷팅"""
+        """모델별 프롬프트 포맷팅 (한국어 시스템 메시지 포함)"""
+        korean_system_msg = "당신은 한국어로만 답변하는 AI 어시스턴트입니다. 모든 답변은 반드시 한국어로 작성해야 합니다."
+
         if self.model_key.startswith("qwen"):
-            return f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+            return f"<|im_start|>system\n{korean_system_msg}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
         elif self.model_key.startswith("llama"):
-            return f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+            return f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{korean_system_msg}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
         else:  # gemma
-            return f"<bos><start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
+            return f"<bos><start_of_turn>system\n{korean_system_msg}<end_of_turn>\n<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
 
     def _format_chat_prompt(self, message: str) -> str:
         """채팅용 프롬프트 포맷팅"""
