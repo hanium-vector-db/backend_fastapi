@@ -49,6 +49,8 @@ pydub
 
 # RSS 뉴스 및 웹 크롤링 (fastapi_backend에서 이동)
 requests
+httpx
 beautifulsoup4
 feedparser
 python-multipart
+edge-tts

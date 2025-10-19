@@ -106,13 +106,26 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "get_finance_updates",
-        "description": "금융 및 주식 정보를 조회합니다.",
+        "description": "코스피(KOSPI) 등 실시간 주식 시장 정보를 조회합니다. 사용자 개인의 자산이 아닌 시장 전체의 정보를 확인할 때 사용합니다.",
         "parameters": {
             "type": "object",
             "properties": {
                 "category": {
                     "type": "string",
                     "description": "카테고리 (stocks/crypto/forex, 선택사항)"
+                }
+            }
+        }
+    },
+    {
+        "name": "get_finance_items",
+        "description": "사용자가 보유한 개인 재정 항목(자산)을 조회합니다. '내 자산', '내 재정 상태', '내가 가진 자산', '내 투자 내역', '보유 자산' 등의 질문에 사용합니다. ETF, 주식, 코인, 예금, 채권, 펀드 등 사용자가 직접 등록한 자산 목록과 총 자산을 확인할 수 있습니다.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "자산 타입 필터 (예: 'ETF', '주식', '코인', '예금', '채권', '펀드' 등, 생략 시 전체 자산 조회)"
                 }
             }
         }

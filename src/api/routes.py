@@ -17,6 +17,7 @@ from services.news_service_rss import NewsServiceRSS
 from services.finance_service import FinanceService
 from services.db_llm_service import DBLLMService
 from services.grocery_rag_service import GroceryRAGService
+from services.yahoo_finance_service import YahooFinanceService
 from models.news_models import NewsKeyword, NewsArticle, NewsResponse
 from models.finance import FinanceItem
 from utils.config_loader import config
@@ -185,6 +186,7 @@ streaming_tts_service = None
 sentence_tts_service = None
 news_service_rss = None
 finance_service = None
+yahoo_finance_service = None
 db_llm_service = None
 tool_executor = None
 grocery_rag_service = None
@@ -263,6 +265,13 @@ def get_finance_service():
         logger.info("재정 관리 서비스 초기화 중...")
         finance_service = FinanceService()
     return finance_service
+
+def get_yahoo_finance_service():
+    global yahoo_finance_service
+    if yahoo_finance_service is None:
+        logger.info("Yahoo Finance 서비스 초기화 중...")
+        yahoo_finance_service = YahooFinanceService()
+    return yahoo_finance_service
 
 async def get_db_llm_service():
     global db_llm_service
@@ -2076,6 +2085,23 @@ async def delete_finance_item(item_id: int):
         logger.error(f"재정 항목 삭제 실패: {e}")
         raise HTTPException(status_code=500, detail=f"재정 항목 삭제 실패: {str(e)}")
 
+# === Yahoo Finance (KOSPI) API 엔드포인트들 ===
+
+@router.get("/yahoo/v8/finance/chart/{symbol}")
+async def get_yahoo_finance_chart(
+    symbol: str,
+    interval: str = Query("1d", description="데이터 간격 (5m, 30m, 1d, 1wk, 1mo)"),
+    range: str = Query("1d", description="기간 (1d, 5d, 1mo, 1y, 5y)")
+):
+    """Yahoo Finance 차트 데이터 조회 (KOSPI 등)"""
+    try:
+        service = get_yahoo_finance_service()
+        data = await service.get_kospi_chart(interval=interval, range_period=range)
+        return data
+    except Exception as e:
+        logger.error(f"Yahoo Finance 데이터 조회 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"Yahoo Finance 데이터 조회 실패: {str(e)}")
+
 # === DB LLM 연동 API 엔드포인트들 ===
 
 @router.post("/chat-with-context")
@@ -2171,6 +2197,101 @@ async def get_user_data(user_id: str, data_type: str, date: str = None):
     except Exception as e:
         logger.error(f"사용자 데이터 조회 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/diet/recommendations")
+async def get_diet_recommendations(authorization: str = Header(None)):
+    """사용자의 건강 정보를 기반으로 LLM이 생성한 개인화된 식단 추천"""
+    try:
+        from services.auth_service import get_current_user_id, set_request_context
+        set_request_context(authorization)
+        user_id = get_current_user_id()
+
+        # DB 서비스 가져오기
+        db_service = await get_db_llm_service()
+
+        # 사용자의 건강 데이터 조회
+        async with db_service.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                # 기저질환 조회
+                await cursor.execute(
+                    "SELECT name, status FROM disease WHERE user_id = %s AND status = 'active'",
+                    (user_id,)
+                )
+                diseases = await cursor.fetchall()
+
+                # 복용약 조회
+                await cursor.execute(
+                    "SELECT name, dosage FROM medication WHERE user_id = %s",
+                    (user_id,)
+                )
+                medications = await cursor.fetchall()
+
+        # 건강 정보를 텍스트로 구성
+        health_info = []
+        if diseases:
+            disease_names = [d['name'] for d in diseases]
+            health_info.append(f"기저질환: {', '.join(disease_names)}")
+        if medications:
+            med_info = [f"{m['name']}({m['dosage']})" if m.get('dosage') else m['name'] for m in medications]
+            health_info.append(f"복용약: {', '.join(med_info)}")
+
+        health_context = " | ".join(health_info) if health_info else "특별한 건강 제약 없음"
+
+        # LLM으로 식단 추천 요청
+        handler = get_llm_handler("bllossom")  # 한국어 특화 모델 사용
+
+        prompt = f"""사용자의 건강 정보: {health_context}
+
+위 건강 정보를 고려하여 오늘의 개인화된 식단을 추천해주세요.
+
+다음 JSON 형식으로만 응답하세요 (다른 설명 없이 JSON만):
+[
+  {{"meal": "아침", "menu": "구체적인 메뉴", "calories": 숫자}},
+  {{"meal": "점심", "menu": "구체적인 메뉴", "calories": 숫자}},
+  {{"meal": "저녁", "menu": "구체적인 메뉴", "calories": 숫자}}
+]
+
+건강 상태에 맞는 영양가 있고 균형 잡힌 식단을 추천해주세요."""
+
+        # LLM 응답 생성
+        llm_response = handler.generate(prompt, max_length=512, stream=False)
+        logger.info(f"Diet LLM 응답: {llm_response}")
+
+        # JSON 파싱
+        import re
+        # JSON 배열 추출 (```json 태그나 다른 텍스트 제거)
+        json_match = re.search(r'\[\s*\{.*?\}\s*\]', llm_response, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(0)
+            diet_recommendations = json.loads(json_str)
+        else:
+            # JSON 파싱 실패 시 기본 식단 반환
+            logger.warning("LLM 응답에서 JSON 추출 실패, 기본 식단 반환")
+            diet_recommendations = [
+                {"meal": "아침", "menu": "오트밀 + 바나나", "calories": 320},
+                {"meal": "점심", "menu": "현미밥 + 연어구이", "calories": 580},
+                {"meal": "저녁", "menu": "샐러드 + 닭가슴살", "calories": 450}
+            ]
+
+        return {
+            "success": True,
+            "data": diet_recommendations,
+            "health_context": health_context
+        }
+
+    except Exception as e:
+        logger.error(f"식단 추천 생성 오류: {e}")
+        # 오류 발생 시 기본 식단 반환
+        return {
+            "success": False,
+            "data": [
+                {"meal": "아침", "menu": "오트밀 + 바나나", "calories": 320},
+                {"meal": "점심", "menu": "현미밥 + 연어구이", "calories": 580},
+                {"meal": "저녁", "menu": "샐러드 + 닭가슴살", "calories": 450}
+            ],
+            "health_context": "정보 없음",
+            "error": str(e)
+        }
 
 # === Health 관리 API 엔드포인트들 ===
 
@@ -2645,6 +2766,7 @@ async def save_profile(request: ProfileRequest):
 async def finalize_registration(request: CredentialsRequest):
     """회원가입 완료 - 사용자 생성 및 토큰 발급"""
     try:
+        logger.info(f"회원가입 완료 요청: registrationId={request.registrationId}, userid={request.userid}")
         pool = await get_registration_db_pool()
         async with pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -2654,18 +2776,22 @@ async def finalize_registration(request: CredentialsRequest):
                     (request.registrationId,)
                 )
                 temp_reg = await cursor.fetchone()
-                
+
                 if not temp_reg:
+                    logger.error(f"등록 정보를 찾을 수 없음: {request.registrationId}")
                     raise HTTPException(status_code=404, detail="등록 정보를 찾을 수 없습니다")
-                
+
+                logger.info(f"임시 등록 정보 확인 완료: {request.registrationId}")
+
                 # userid 중복 확인
                 await cursor.execute(
                     "SELECT userid FROM users WHERE userid = %s",
                     (request.userid,)
                 )
                 existing_user = await cursor.fetchone()
-                
+
                 if existing_user:
+                    logger.warning(f"중복 아이디: {request.userid}")
                     raise HTTPException(status_code=400, detail="이미 사용 중인 아이디입니다")
                 
                 # 사용자 생성
@@ -2870,4 +2996,36 @@ async def delete_calendar_event(event_id: int, authorization: str = Header(None)
         raise
     except Exception as e:
         logger.error(f"일정 삭제 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/speech/text-to-speech")
+async def text_to_speech(request: dict):
+    """
+    텍스트를 음성으로 변환 (TTS)
+    """
+    try:
+        from services.tts_service import TTSService
+        from fastapi.responses import StreamingResponse
+        
+        text = request.get("text", "")
+        language = request.get("language", "ko")
+        slow = request.get("slow", False)
+        
+        if not text:
+            raise HTTPException(status_code=400, detail="텍스트가 필요합니다")
+        
+        tts_service = TTSService()
+        audio_buffer = tts_service.text_to_speech(text, language, slow)
+        
+        logger.info(f"TTS 요청: {text[:50]}...")
+        
+        return StreamingResponse(
+            audio_buffer,
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": "attachment; filename=speech.mp3"
+            }
+        )
+    except Exception as e:
+        logger.error(f"TTS 처리 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))

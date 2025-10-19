@@ -81,6 +81,10 @@ class ToolCallingWrapper:
 - [PAGE:/price:가격 추적 보기] - 가격 관련 질문일 때
 - [PAGE:/weather-detail:날씨 정보 자세히 보기] - 날씨 관련 질문일 때
 
+**중요: 재정/금융 관련 도구 선택:**
+- "내 재정 상태", "내 자산", "보유 자산", "내 투자" → get_finance_items (사용자 개인 자산)
+- "코스피", "주식 시장", "시장 동향" → get_finance_updates (시장 정보)
+
 **예시:**
 사용자: "오늘 뉴스 알려줘"
 어시스턴트: TOOL_CALL: {{"name": "get_news", "parameters": {{"limit": 5}}}}
@@ -93,6 +97,14 @@ class ToolCallingWrapper:
 사용자: "고혈압 추가해줘"
 어시스턴트: TOOL_CALL: {{"name": "add_disease", "parameters": {{"name": "고혈압", "status": "active"}}}}
 → 최종 답변: "고혈압이 추가되었습니다. [PAGE:/health:건강 정보에서 관리할 수 있어요]"
+
+사용자: "내 재정 상태 알려줘"
+어시스턴트: TOOL_CALL: {{"name": "get_finance_items", "parameters": {{}}}}
+→ 최종 답변: "현재 보유하신 자산은 총 5개이며, 총 자산은 10,000,000원입니다. [상세 내역] [PAGE:/finance:자세한 재정 정보는 이곳을 확인하세요]"
+
+사용자: "코스피 어때?"
+어시스턴트: TOOL_CALL: {{"name": "get_finance_updates", "parameters": {{}}}}
+→ 최종 답변: "현재 코스피는 2,600포인트입니다. [PAGE:/finance:금융 시장 정보 더보기]"
 """
 
     def _parse_tool_call(self, response: str) -> Optional[Dict[str, Any]]:
