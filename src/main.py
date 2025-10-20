@@ -17,6 +17,9 @@ from api.routes import router
 from gradio_app import gradio_ui  # Gradio UI 임포트
 import logging
 
+# (추가) 가격 예측 라우터 import
+from api.routers import price_forecast
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -58,6 +61,9 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api/v1")
+# ✅ (추가) 가격 예측 모듈 라우터 등록
+# - /api/v1/price-forecast 엔드포인트에서 예측 결과 제공
+app.include_router(price_forecast.router, prefix="/api/v1/price-forecast", tags=["Price Forecast"]
 
 @app.get("/")
 def read_root():
@@ -209,4 +215,5 @@ if __name__ == "__main__":
         host=server_config['host'],
         port=server_config['port'],
         reload=True  # 개발 시 자동 리로드 활성화
+
     )
